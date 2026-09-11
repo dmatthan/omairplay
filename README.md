@@ -70,16 +70,6 @@ The bar icon shows the receiver's state:
 The popup shows what's playing — title, artist, album, cover art and the
 sending device's volume.
 
-## Playback control
-
-There isn't any, deliberately. An AirPlay 2 receiver cannot pause or skip the
-device sending to it — the protocol has no path for it, so `shairport-sync`
-reports the controls as available while doing nothing. Rather than draw buttons
-that silently fail, OmairPlay shows the track and says to use your phone.
-
-Lossless audio and working transport controls both require a classic AirPlay 1
-build, which is a different thing to install. Not supported here yet.
-
 ## Settings
 
 In the popup: **speaker name** and **start at login**.
