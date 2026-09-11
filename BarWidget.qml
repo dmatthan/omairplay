@@ -418,6 +418,16 @@ Panel {
             horizontalAlignment: Text.AlignHCenter
           }
 
+          // A small aesthetic flourish, driven by the receiver's real output
+          // level. Alive only while this popup is open -- see LevelMeter.qml.
+          LevelMeter {
+            width: parent.width
+            active: root.opened && root.svc !== null && root.svc.setupComplete
+                    && root.svc.effectiveRunning && root.svc.playing
+            foreground: root.foreground
+            accent: Color.accent
+          }
+
           // --------------------------------------------------------- alerts
           //
           // Safety rule 4: another shairport-sync holding the AirPlay 2 slot

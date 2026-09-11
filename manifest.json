@@ -23,7 +23,8 @@
     "defaults": {
       "speakerName": "Omarchy Speaker",
       "refreshIntervalSec": 5,
-      "showArtwork": true
+      "showArtwork": true,
+      "trackNotifications": true
     },
     "schema": [
       {
@@ -45,6 +46,12 @@
         "key": "showArtwork",
         "type": "boolean",
         "label": "Show cover art",
+        "defaultValue": true
+      },
+      {
+        "key": "trackNotifications",
+        "type": "boolean",
+        "label": "Notify when the track changes",
         "defaultValue": true
       }
     ]

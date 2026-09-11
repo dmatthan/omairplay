@@ -67,8 +67,16 @@ The bar icon shows the receiver's state:
 - **Right-click** — turn the receiver on or off without opening anything
 - In the popup: `j`/`k` or arrows to move, `Enter` to activate, `Esc` to close
 
-The popup shows what's playing — title, artist, album, cover art and the
-sending device's volume.
+The popup shows what's playing — title, artist, album, cover art, the sending
+device's volume, and a level meter driven by the receiver's real output. A
+notification with the cover art appears when the track changes.
+
+It takes its colours and font from whichever Omarchy theme you're using:
+
+![The popup under three Omarchy themes](themes.png)
+
+Play, pause and skip stay on your phone: an AirPlay 2 receiver is an output,
+not a remote.
 
 ## Settings
 
@@ -76,11 +84,12 @@ In the popup: **speaker name** and **start at login**.
 
 Renaming restarts the receiver, which interrupts playback, so it asks first.
 
-Two more settings are available via the bar config:
+The rest are available via the bar config:
 
 ```bash
-omarchy bar set io.github.dmatthan.omairplay refreshIntervalSec 5
+omarchy bar set io.github.dmatthan.omairplay trackNotifications false
 omarchy bar set io.github.dmatthan.omairplay showArtwork false
+omarchy bar set io.github.dmatthan.omairplay refreshIntervalSec 5
 omarchy bar move io.github.dmatthan.omairplay --section right
 ```
 
@@ -120,8 +129,11 @@ permissions — this one included. What that means here:
 - Removal validates each recorded rule against the exact shape setup writes,
   and rebuilds the command from the matched fields rather than executing a line
   from a file.
-- Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable.
-  No privilege is needed or requested to check it.
+- Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable,
+  so checking it needs no privilege.
+- Your local network is the trust boundary: a device has to be on it to reach
+  the receiver at all. AirPlay 2 itself carries no password mechanism, so keep
+  that in mind on networks you don't control.
 - Nothing is written outside `$HOME`, apart from the packages and the `nqptp`
   system service enabled during setup.
 

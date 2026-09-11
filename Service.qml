@@ -39,6 +39,7 @@ Item {
     var wanted = String(setting("speakerName", "")).trim()
     return (wanted === "" ? "Omarchy Speaker" : wanted).substring(0, 50)
   }
+  readonly property bool trackNotifications: setting("trackNotifications", true) !== false
   readonly property int refreshIntervalSec: {
     var n = parseInt(String(setting("refreshIntervalSec", 5)), 10)
     if (!isFinite(n)) n = 5
@@ -189,6 +190,64 @@ Item {
       default:        return "Ready"
     }
   }
+
+  // ---------------------------------------------------- track notifications
+  //
+  // Omarchy's own track OSD cannot be used for this. `omarchy.media` does have
+  // one, but it only fires from user-initiated actions through its widget
+  // (Service.qml:429) -- nothing there watches for a track changing on its
+  // own, which is the only way a track ever changes here. And the OSD belongs
+  // to `omarchy.osd`, which a third-party plugin cannot summon: the host
+  // scopes summon() to the plugin's own id (shell.qml pluginOwnsTarget).
+  //
+  // So use a desktop notification. Omarchy's shell owns
+  // org.freedesktop.Notifications, so notify-send produces a native, themed
+  // notification with the cover art as its image.
+  readonly property string trackKey: playing && hasTrack
+    ? (title + "\u001f" + artist + "\u001f" + album) : ""
+
+  property string _notifiedTrack: ""
+  property double _serviceLoadedAt: 0
+
+  onTrackKeyChanged: if (trackNotifications && trackKey !== "") notifyDebounce.restart()
+
+  // shairport-sync delivers metadata in pieces -- title first, then artist,
+  // then cover art -- so reacting to each change would fire three times for one
+  // song. Wait for it to settle. (The freedesktop "synchronous" hint that would
+  // otherwise replace a notification in place is not honoured here; tested, and
+  // three rapid notifications stacked.)
+  Timer {
+    id: notifyDebounce
+    interval: 900
+    repeat: false
+    onTriggered: root.notifyTrackChange()
+  }
+
+  function notifyTrackChange() {
+    if (!trackNotifications || !playing || !hasTrack) return
+    if (trackKey === _notifiedTrack) return
+    _notifiedTrack = trackKey
+
+    // Don't announce whatever was already playing when this service loaded --
+    // a shell restart mid-song should be silent. A grace period rather than a
+    // "first one" flag, so a song that starts later is still announced.
+    if (Date.now() - _serviceLoadedAt < 5000) return
+
+    var args = ["notify-send", "-a", "OmairPlay"]
+    var art = String(artUrl || "")
+    if (art.indexOf("file://") === 0)
+      args.push("-i", decodeURIComponent(art.substring(7)))
+    args.push(title !== "" ? title : "AirPlay")
+
+    var sub = []
+    if (artist !== "") sub.push(artist)
+    if (album !== "" && album !== title) sub.push(album)
+    args.push(sub.join("  \u00b7  "))
+
+    Quickshell.execDetached(args)
+  }
+
+  Component.onCompleted: _serviceLoadedAt = Date.now()
 
   // "Title - Artist", or as much of it as there is.
   readonly property string trackLine: {
