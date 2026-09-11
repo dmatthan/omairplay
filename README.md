@@ -50,13 +50,15 @@ password prompt. It:
 **The plugin itself never needs root while running.** Only setup and removal do,
 and both run visibly in a terminal.
 
-The receiver runs as a **user** service, `omarchy-airplay.service`. The
-`shairport-sync` packages ship their own system and user units; leave both
-disabled — a machine has only one AirPlay 2 slot, and two receivers fight over
-port 7000. OmairPlay refuses to set up while either is active, and tells you
-how to disable it.
+The receiver runs as a user service, `omarchy-airplay.service`. A machine gets
+one AirPlay 2 receiver, so if the packaged `shairport-sync` units are enabled,
+setup tells you which one to disable and how.
 
 ## Using it
+
+Pick your machine from the AirPlay list on your phone, and play:
+
+![Choosing the speaker on iOS, and playing to it](iphone.png)
 
 The bar icon shows the receiver's state:
 
@@ -72,15 +74,13 @@ The bar icon shows the receiver's state:
 
 The popup shows what's playing — title, artist, album, cover art, the sending
 device's volume, and a level meter driven by the receiver's real output. When
-the track changes, a notification appears with the cover art; turn it off with
-`trackNotifications` below.
+the track changes, a notification appears with the cover art.
 
 It takes its colours and font from whichever Omarchy theme you're using:
 
 ![The popup under three Omarchy themes](themes.png?v=2)
 
-Play, pause and skip stay on your phone: an AirPlay 2 receiver is an output,
-not a remote.
+Control playback from your phone — it stays the player throughout.
 
 ## Settings
 
@@ -99,13 +99,13 @@ omarchy bar move io.github.dmatthan.omairplay --section right
 
 ## If your phone sees the speaker but won't connect
 
-That's almost always the firewall: mDNS discovery passes through `ufw` while the
-connection itself is blocked. OmairPlay checks the live `ufw` rules and will say
-so in the popup, with a button to re-run setup.
+Check the firewall. mDNS discovery reaches you through `ufw` on its own, so the
+speaker can appear on your phone while the connection is still blocked.
+OmairPlay reads the live `ufw` rules and says so in the popup, with a button to
+re-run setup.
 
-It can also happen after your router hands out a new IPv6 prefix, which leaves
-the old rule matching nothing. Same fix: re-run setup, which re-derives your
-current addresses.
+The same applies after your router hands out a new IPv6 prefix. Re-running
+setup picks up your current addresses.
 
 ## Removing it
 
@@ -120,22 +120,17 @@ Two steps, and the order matters.
    omarchy plugin remove io.github.dmatthan.omairplay
    ```
 
-If you remove the plugin first, setup has already put a standalone copy of the
-uninstaller outside the plugin folder, so it still works:
+Setup also keeps a copy of the uninstaller outside the plugin folder, so it
+works on its own:
 
 ```bash
 ~/.local/state/io.github.dmatthan.omairplay/airplay-remove --firewall
 ```
 
-Because every rule it adds is tagged, the uninstaller finds them by that tag
-rather than from a saved list — so it also clears up rules left by an older
-version, or for a network you are no longer on.
+Every rule it adds carries the `omairplay` tag, and the uninstaller finds them
+by that tag.
 
-`omarchy plugin remove` only deletes files — Omarchy never runs plugin code when
-adding or removing a plugin, and never does so with root. Undoing the firewall
-needs root, so it stays a deliberate, visible step rather than a side effect.
-
-The `shairport-sync` and `nqptp` packages are left installed either way.
+The `shairport-sync` and `nqptp` packages stay installed.
 
 ## Notes on safety
 
@@ -145,19 +140,17 @@ permissions — this one included. What that means here:
 - Root is used only by `bin/airplay-setup` and `bin/airplay-remove`, both run
   visibly in a terminal. Neither is invoked with `pkexec`: the plugin folder is
   user-writable, so running a script from it as root would be a way to escalate.
-- Firewall rules are limited to private address ranges (RFC1918, plus IPv6
-  link-local and unique-local), following the same convention as Omarchy's own
-  installers. Nothing is opened to Anywhere, and `ufw` is never disabled or
-  reset. The one wide rule — the kernel ephemeral range that AirPlay 2 uses for
-  its audio channels — is narrowed further, to only the private ranges this
-  machine actually holds an address in.
+- Firewall rules are limited to private address ranges — RFC1918, plus IPv6
+  link-local and unique-local — following the same convention as Omarchy's own
+  installers. `ufw` is never disabled or reset. The widest rule, the kernel
+  ephemeral range AirPlay 2 uses for its audio channels, is limited to the
+  private ranges this machine actually holds an address in.
 - Removal works from the `omairplay` tag on each rule, so it needs no saved
   list and never executes a command read from a file.
 - Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable,
   so checking it needs no privilege.
 - Your local network is the trust boundary: a device has to be on it to reach
-  the receiver at all. AirPlay 2 itself carries no password mechanism, so keep
-  that in mind on networks you don't control.
+  the receiver.
 - Nothing is written outside `$HOME`, apart from the packages and the `nqptp`
   system service enabled during setup.
 
