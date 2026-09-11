@@ -115,10 +115,21 @@ echo
 # does have to be a system service. It carries no audio and exposes no control
 # interface. Safety rule 4 allows exactly this.
 bold "3. nqptp (system service, needs ports 319 and 320)"
+# Record whether *we* enabled it, so removal can undo exactly what setup did
+# and nothing more. Without this, removal cannot tell our change from a service
+# the user had already enabled for their own reasons -- and guessing, or asking
+# them to guess, is worse than keeping a one-line note.
 if [[ "$(systemctl is-enabled nqptp.service 2>/dev/null)" == "enabled" ]]; then
-  echo "nqptp.service is already enabled."
+  echo "nqptp.service was already enabled; leaving that alone."
 else
   run sudo systemctl enable nqptp.service
+  run mkdir -p "$STATE_DIR"
+  if [[ $DRY_RUN != yes ]]; then
+    printf '%s\n' \
+      "# OmairPlay enabled nqptp.service on $(date -Is)." \
+      "# It was not enabled before. airplay-remove disables it again." \
+      >"$STATE_DIR/enabled-nqptp"
+  fi
 fi
 if systemctl is-active nqptp.service &>/dev/null; then
   echo "nqptp.service is already running."
@@ -255,5 +266,5 @@ To undo everything later, use "Remove receiver" in the plugin popup. A copy of
 the uninstaller also lives outside the plugin folder, so it still works if the
 plugin itself is removed first:
 
-    $STATE_DIR/airplay-remove --firewall
+    $STATE_DIR/airplay-remove --system
 EOM

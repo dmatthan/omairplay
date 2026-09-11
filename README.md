@@ -112,8 +112,9 @@ setup picks up your current addresses.
 Two steps, and the order matters.
 
 1. **Remove receiver** in the popup. This undoes the setup: it stops the
-   receiver, disables it at login, deletes its config and cover-art cache, and
-   removes the firewall rules it added.
+   receiver, disables it at login, deletes its config and cover-art cache,
+   removes the firewall rules it added, and turns the `nqptp` system service
+   back off if setup was the thing that enabled it.
 2. Then remove the plugin itself:
 
    ```bash
@@ -124,7 +125,7 @@ Setup also keeps a copy of the uninstaller outside the plugin folder, so it
 works on its own:
 
 ```bash
-~/.local/state/io.github.dmatthan.omairplay/airplay-remove --firewall
+~/.local/state/io.github.dmatthan.omairplay/airplay-remove --system
 ```
 
 Every rule it adds carries the `omairplay` tag, and the uninstaller finds them

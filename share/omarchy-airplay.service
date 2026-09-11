@@ -8,7 +8,7 @@ Documentation=man:shairport-sync(1)
 # it set up -- this service, its config, and the firewall rules it added -- can
 # be undone with the uninstaller kept outside the plugin folder:
 #
-#   ~/.local/state/io.github.dmatthan.omairplay/airplay-remove --firewall
+#   ~/.local/state/io.github.dmatthan.omairplay/airplay-remove --system
 #
 # Every firewall rule it added is tagged, so you can also see them directly:
 #

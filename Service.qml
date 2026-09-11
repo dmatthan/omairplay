@@ -327,7 +327,7 @@ Item {
   }
 
   function runRemove() {
-    launchInTerminal(Util.shellQuote(pluginDir + "/bin/airplay-remove") + " --firewall")
+    launchInTerminal(Util.shellQuote(pluginDir + "/bin/airplay-remove") + " --system")
   }
 
   function launchInTerminal(command) {

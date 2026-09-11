@@ -1,9 +1,9 @@
 #!/bin/bash
 # Remove the AirPlay receiver.
 #
-# Everything except the firewall is unprivileged, because everything the plugin
-# owns lives in $HOME. Deleting firewall rules needs root, so by default this
-# only prints what it would do; pass --firewall to actually remove them.
+# Everything inside $HOME is undone unprivileged. Setup also made two changes
+# that need root to reverse -- the firewall rules, and enabling the nqptp system
+# service -- so by default this only prints those; pass --system to undo them.
 #
 # Designed to work from two places: inside the plugin folder, and from
 # ~/.local/state/<id>/, where setup keeps a copy so that removing the plugin
@@ -12,15 +12,17 @@
 # Package removal is deliberately not done here. shairport-sync and nqptp may
 # be wanted by something else, and uninstalling them needs its own decision.
 #
-# Usage: airplay-remove [--firewall] [--dry-run]
+# Usage: airplay-remove [--system] [--dry-run]
+#
+# --firewall is accepted as an older name for --system.
 
 set -uo pipefail
 
-DO_FIREWALL="no"
+DO_SYSTEM="no"
 DRY_RUN="no"
 while (( $# )); do
   case "$1" in
-    --firewall) DO_FIREWALL="yes"; shift ;;
+    --system|--firewall) DO_SYSTEM="yes"; shift ;;
     --dry-run)  DRY_RUN="yes"; shift ;;
     *) echo "airplay-remove: unknown argument '$1'" >&2; exit 2 ;;
   esac
@@ -80,12 +82,12 @@ bold "3. Firewall"
 # Deleted highest-numbered first, because ufw renumbers as rules are removed.
 if ! command -v ufw >/dev/null 2>&1; then
   echo "ufw is not installed; nothing to undo."
-elif [[ $DO_FIREWALL != yes ]]; then
+elif [[ $DO_SYSTEM != yes ]]; then
   echo "Removing firewall rules needs root, so they have been left in place."
   echo "To see them:"
   echo "    sudo ufw status | grep $OMAIRPLAY_UFW_COMMENT"
   echo "To remove them, re-run:"
-  echo "    $(readlink -f "${BASH_SOURCE[0]}") --firewall"
+  echo "    $(readlink -f "${BASH_SOURCE[0]}") --system"
 else
   mapfile -t numbers < <(
     sudo ufw status numbered 2>/dev/null \
@@ -104,9 +106,33 @@ else
 fi
 echo
 
-bold "4. Leftover files"
+bold "4. The nqptp system service"
+# Undo this only if setup is the thing that enabled it. Setup leaves a note
+# saying so; without that note the service was already enabled before this
+# plugin arrived, and turning it off would be breaking something that was not
+# ours. That is why there is no prompt here: ownership is recorded, so there is
+# nothing for the user to be asked.
+NQPTP_NOTE="$STATE_DIR/enabled-nqptp"
+if [[ ! -f $NQPTP_NOTE ]]; then
+  echo "nqptp.service was not enabled by this plugin; leaving it alone."
+elif [[ "$(systemctl is-enabled nqptp.service 2>/dev/null)" != "enabled" ]] \
+     && ! systemctl is-active nqptp.service &>/dev/null; then
+  echo "nqptp.service is already off."
+  run rm -f "$NQPTP_NOTE"
+elif [[ $DO_SYSTEM != yes ]]; then
+  echo "Setup enabled nqptp.service. Disabling it needs root, so it has been"
+  echo "left running. To undo it:"
+  echo "    sudo systemctl disable --now nqptp.service"
+else
+  echo "Setup enabled nqptp.service, so turning it back off."
+  run sudo systemctl disable --now nqptp.service
+  run rm -f "$NQPTP_NOTE"
+fi
+echo
+
+bold "5. Leftover files"
 for f in "$STATE_DIR/airplay-wait-audio" "$STATE_DIR/airplay-firewall-spec" \
-         "$STATE_DIR/firewall-configured"; do
+         "$STATE_DIR/firewall-configured" "$STATE_DIR/enabled-nqptp"; do
   [[ -e $f ]] && run rm -f "$f"
 done
 # Deliberately not deleting this script when it is the copy being run.
@@ -116,9 +142,8 @@ echo
 bold "Done."
 cat <<EOM
 
-The packages are still installed. shairport-sync and nqptp may be wanted by
-something else, so removing them is a separate decision:
+The shairport-sync and nqptp packages are still installed. They sit inert, and
+may be wanted by something else, so removing them is a separate decision:
 
     sudo pacman -Rs shairport-sync nqptp
-    sudo systemctl disable --now nqptp.service
 EOM
