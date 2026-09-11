@@ -1,13 +1,16 @@
 #!/bin/bash
 # Remove the AirPlay receiver.
 #
-# Everything here except the firewall is unprivileged, because everything the
-# plugin owns lives in $HOME. The ufw rules do need root, so by default this
-# only *prints* the commands that delete them and lets Daniel decide; pass
-# --firewall to run them, which will ask for a password.
+# Everything except the firewall is unprivileged, because everything the plugin
+# owns lives in $HOME. Deleting firewall rules needs root, so by default this
+# only prints what it would do; pass --firewall to actually remove them.
+#
+# Designed to work from two places: inside the plugin folder, and from
+# ~/.local/state/<id>/, where setup keeps a copy so that removing the plugin
+# does not take the uninstaller with it.
 #
 # Package removal is deliberately not done here. shairport-sync and nqptp may
-# be wanted by something else, and uninstalling them needs its own approval.
+# be wanted by something else, and uninstalling them needs its own decision.
 #
 # Usage: airplay-remove [--firewall] [--dry-run]
 
@@ -23,12 +26,19 @@ while (( $# )); do
   esac
 done
 
+HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# The spec is the source of truth for the tag when it is available. When this
+# script is running standalone it may not be, so fall back to the literal —
+# this must stay in step with OMAIRPLAY_UFW_COMMENT in airplay-firewall-spec.
+# shellcheck source=/dev/null
+[[ -r "$HERE/airplay-firewall-spec" ]] && source "$HERE/airplay-firewall-spec"
+: "${OMAIRPLAY_UFW_COMMENT:=omairplay}"
+
 UNIT="omarchy-airplay.service"
 UNIT_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shairport-sync"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/io.github.dmatthan.omairplay"
-MARKER="$STATE_DIR/firewall-configured"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -54,7 +64,7 @@ else
 fi
 echo
 
-bold "2. Delete the unit and the generated config"
+bold "2. Delete the unit, the generated config and the cover-art cache"
 [[ -f $UNIT_PATH ]] && run rm -f "$UNIT_PATH" || echo "No unit file at $UNIT_PATH"
 [[ -d $CONFIG_DIR ]] && run rm -rf "$CONFIG_DIR" || echo "No config at $CONFIG_DIR"
 [[ -d $CACHE_DIR ]] && run rm -rf "$CACHE_DIR" || echo "No cover-art cache at $CACHE_DIR"
@@ -62,58 +72,49 @@ run systemctl --user daemon-reload
 echo
 
 bold "3. Firewall"
-if [[ ! -r $MARKER ]]; then
-  echo "No record of added rules at $MARKER, so nothing to undo."
+# Every rule this plugin adds carries the comment tag, so removal works by
+# finding the tag rather than by remembering what was added. That is exhaustive
+# in a way a saved list never was: it also catches rules left behind by an
+# earlier version, or for a network prefix the machine no longer has.
+#
+# Deleted highest-numbered first, because ufw renumbers as rules are removed.
+if ! command -v ufw >/dev/null 2>&1; then
+  echo "ufw is not installed; nothing to undo."
+elif [[ $DO_FIREWALL != yes ]]; then
+  echo "Removing firewall rules needs root, so they have been left in place."
+  echo "To see them:"
+  echo "    sudo ufw status | grep $OMAIRPLAY_UFW_COMMENT"
+  echo "To remove them, re-run:"
+  echo "    $(readlink -f "${BASH_SOURCE[0]}") --firewall"
 else
-  mapfile -t DELETES < <(grep -E '^sudo ufw delete ' "$MARKER")
-  if (( ${#DELETES[@]} == 0 )); then
-    echo "No delete commands recorded in $MARKER."
-  elif [[ $DO_FIREWALL == yes ]]; then
-    # Each line is matched against exactly the rule shape airplay-setup writes,
-    # and the command is then rebuilt from the captured fields. The previous
-    # version word-split the line and ran it directly, which meant anything
-    # able to write to $MARKER -- a plain file under $HOME -- got to choose a
-    # command that runs under sudo. That is the same privilege-escalation shape
-    # the safety rules reject pkexec-on-plugin-scripts for, so it does not get
-    # a pass just because we wrote the file ourselves.
-    ip4='[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}'
-    ip6='[0-9a-fA-F:]+/[0-9]{1,3}'
-    ports='[0-9]{1,5}(,[0-9]{1,5})*|[0-9]{1,5}:[0-9]{1,5}'
-    pattern="^sudo ufw delete allow from (${ip4}|${ip6}) to any port (${ports}) proto (tcp|udp)\$"
-
-    skipped=0
-    for cmd in "${DELETES[@]}"; do
-      if [[ ! $cmd =~ $pattern ]]; then
-        warn "Refusing to run an unrecognised line from $MARKER:"
-        warn "    $cmd"
-        skipped=$((skipped + 1))
-        continue
-      fi
-      src="${BASH_REMATCH[1]}"
-      port="${BASH_REMATCH[3]}"
-      proto="${BASH_REMATCH[5]}"
-      run sudo ufw delete allow from "$src" to any port "$port" proto "$proto"
-    done
-
-    if (( skipped > 0 )); then
-      warn "$skipped line(s) were left alone. Check them by hand:"
-      warn "    $MARKER"
-    elif [[ $DRY_RUN != yes ]]; then
-      rm -f "$MARKER"
-    fi
+  mapfile -t numbers < <(
+    sudo ufw status numbered 2>/dev/null \
+      | grep -F "# $OMAIRPLAY_UFW_COMMENT" \
+      | grep -oE '^\[[ 0-9]+\]' | tr -d '[] ' | sort -rn
+  )
+  if (( ${#numbers[@]} == 0 )); then
+    echo "No rules tagged \"$OMAIRPLAY_UFW_COMMENT\" found."
   else
-    echo "These rules were added for AirPlay. Removing them needs root, so"
-    echo "they have been left in place. To remove them:"
-    echo
-    printf '    %s\n' "${DELETES[@]}"
-    echo
-    echo "Or re-run:  airplay-remove --firewall"
+    echo "Removing ${#numbers[@]} rule(s) tagged \"$OMAIRPLAY_UFW_COMMENT\"."
+    for n in "${numbers[@]}"; do
+      run sudo ufw --force delete "$n" || warn "Rule $n was already gone."
+    done
+    run sudo ufw reload
   fi
 fi
 echo
 
+bold "4. Leftover files"
+for f in "$STATE_DIR/airplay-wait-audio" "$STATE_DIR/airplay-firewall-spec" \
+         "$STATE_DIR/firewall-configured"; do
+  [[ -e $f ]] && run rm -f "$f"
+done
+# Deliberately not deleting this script when it is the copy being run.
+echo "The uninstaller itself is left at $STATE_DIR; delete it when you are done."
+echo
+
 bold "Done."
-cat <<'EOM'
+cat <<EOM
 
 The packages are still installed. shairport-sync and nqptp may be wanted by
 something else, so removing them is a separate decision:

@@ -33,8 +33,9 @@ while (( $# )); do
 done
 
 PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "$PLUGIN_DIR/bin/airplay-firewall-spec"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/io.github.dmatthan.omairplay"
-MARKER="$STATE_DIR/firewall-configured"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -127,134 +128,44 @@ fi
 echo
 
 # ------------------------------------------------------------------- firewall
-# Safety rule 3: LAN-scoped only, never Anywhere, never `ufw disable`/`reset`,
-# and every rule logged with the command that removes it.
+# Safety rule 3: local networks only, never Anywhere, never `ufw disable` or
+# `reset`. The rule set itself lives in bin/airplay-firewall-spec so that setup,
+# the checker and the remover cannot disagree about it.
 bold "4. Firewall"
 
-# Derive the LAN from the default route rather than hardcoding it. This machine
-# is on a USB wifi adapter, so the interface name can change between ports;
-# the subnet is the stable thing to scope to.
-LAN_CIDR="$(ip -o -4 route show scope link \
-  | awk -v dev="$(ip -o -4 route show default | awk '{print $5; exit}')" \
-      '$3 == dev {print $1; exit}')"
-
-if [[ -z ${LAN_CIDR:-} || $LAN_CIDR == "0.0.0.0/0" ]]; then
-  fail "Could not work out which subnet is your local network, and this script
-will not fall back to opening ports to Anywhere.
-
-The usual cause is a VPN: the local subnet is found by following the default
-route, and a VPN tunnel replaces that route with its own. Disconnect the VPN
-and run setup again -- the rules it adds keep working once you reconnect,
-because they match on source address rather than on routing."
-fi
-echo "Local subnet: $LAN_CIDR"
-
-UFW_RULES=(
-  "allow from $LAN_CIDR to any port 7000 proto tcp"
-  "allow from $LAN_CIDR to any port 319,320 proto udp"
-  "allow from $LAN_CIDR to any port 5353 proto udp"
-)
-
-# IPv6 is not optional here, which the handoff did not anticipate. The phone
-# reaches for PTP timing (319/320) over IPv6 even when it finds the receiver
-# over IPv4, and PTP is what keeps AirPlay 2 in sync -- so dropping it breaks
-# playback even when the audio path itself is fine.
-#
-# Scope each rule to a genuinely local prefix, derived at runtime:
-#   fe80::/10  link-local, cannot be routed off-link by definition
-#   fd00::/8   unique local addresses, not globally routable
-#   the /64 of each global address, i.e. this LAN's own subnet
-#
-# The global /64 is the fragile one: it comes from the ISP and changes if the
-# prefix is re-delegated, at which point these rules silently stop matching.
-# That is one of the things the plugin's firewall hint is for. Re-running this
-# setup re-derives it.
-V6_PREFIXES=( "fe80::/10" )
-while read -r addr; do
-  [[ -n $addr ]] || continue
-  prefix="$(python3 -c '
-import ipaddress, sys
-print(ipaddress.IPv6Network(sys.argv[1] + "/64", strict=False))
-' "$addr" 2>/dev/null)" || continue
-  [[ -n $prefix ]] || continue
-  # Never let a mis-derived prefix become a rule open to the whole internet.
-  [[ $prefix == "::/0" ]] && continue
-  V6_PREFIXES+=( "$prefix" )
-done < <(ip -6 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')
-
-# De-duplicate, since two addresses can share a /64.
-mapfile -t V6_PREFIXES < <(printf '%s\n' "${V6_PREFIXES[@]}" | awk '!seen[$0]++')
-
-for prefix in "${V6_PREFIXES[@]}"; do
-  UFW_RULES+=( "allow from $prefix to any port 319,320 proto udp" )
-done
-
-# AirPlay 2 opens its data channels on kernel ephemeral ports and cannot be
-# told to pin them, so there is nothing narrower to ask for than this machine's
-# own ephemeral range -- still scoped to the LAN, never to Anywhere. Both
-# protocols: the listeners observed on this machine were TCP.
-if [[ $WIDE == yes ]]; then
-  read -r LOW HIGH </proc/sys/net/ipv4/ip_local_port_range
-  UFW_RULES+=(
-    "allow from $LAN_CIDR to any port $LOW:$HIGH proto tcp"
-    "allow from $LAN_CIDR to any port $LOW:$HIGH proto udp"
-  )
-fi
-
-mkdir -p "$STATE_DIR"
-: >"$MARKER.tmp"
-{
-  echo "# ufw rules added by airplay-setup on $(date -Is)"
-  echo "# Subnet: $LAN_CIDR"
-  echo "#"
-  echo "# Remove every one of them with:"
-} >>"$MARKER.tmp"
-
-# `ufw status` needs root, but /etc/ufw/user.rules is world-readable, so the
-# "is this rule already here?" check costs no password at all. ufw records each
-# rule as a tuple line:
-#
-#   ### tuple ### allow tcp 7000 0.0.0.0/0 any 192.168.0.0/24 in
-#                       ^     ^                ^
-#                       proto dport            source
-# IPv4 rules land in user.rules, IPv6 rules in user6.rules. Both are
-# world-readable, so check whichever matches the rule's address family.
-ufw_rule_present() {
-  local proto="$1" port="$2" src="$3" file
-  if [[ $src == *:* ]]; then
-    file=/etc/ufw/user6.rules
-  else
-    file=/etc/ufw/user.rules
-  fi
-  [[ -r $file ]] || return 1
-  # The source is a literal in the tuple, so quote the regex metacharacters in
-  # it -- an unescaped "::/0" or a "." would otherwise match too much.
-  local src_re
-  src_re="$(printf '%s' "$src" | sed -e 's/[].[^$*\\]/\\&/g')"
-  local port_re
-  port_re="$(printf '%s' "$port" | sed -e 's/[].[^$*\\]/\\&/g')"
-  grep -qE "^### tuple ### allow ${proto} ${port_re} [^ ]+ any ${src_re} in" "$file"
-}
-
-for rule in "${UFW_RULES[@]}"; do
-  # "allow from <src> to any port <port> proto <proto>"
-  read -r _ _ src _ _ _ port _ proto <<<"$rule"
-  if ufw_rule_present "$proto" "$port" "$src"; then
-    echo "Already present: ufw $rule"
-  else
-    # shellcheck disable=SC2086
-    run sudo ufw $rule
-  fi
-  echo "sudo ufw delete $rule" >>"$MARKER.tmp"
-done
-
-if [[ $DRY_RUN == yes ]]; then
-  rm -f "$MARKER.tmp"
+if ! command -v ufw >/dev/null 2>&1; then
+  warn "ufw is not installed, so no firewall rules were added."
+  warn "If you use another firewall, AirPlay 2 needs TCP 7000, UDP 319, 320"
+  warn "and 5353, plus the kernel ephemeral range, reachable from your LAN."
 else
-  mv -f "$MARKER.tmp" "$MARKER"
-  echo
-  echo "Rules and their delete commands logged to:"
-  echo "  $MARKER"
+  mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
+  if [[ -r /etc/default/ufw ]] && ! grep -qE '^IPV6=yes' /etc/default/ufw; then
+    warn "ufw has IPv6 disabled, so IPv6 rules are skipped. AirPlay 2 clock"
+    warn "sync may fall back to IPv4; if playback will not start, enable IPv6"
+    warn "in /etc/default/ufw and run setup again."
+    GLOBAL_V6=()
+    SKIP_V6=yes
+  else
+    SKIP_V6=no
+  fi
+
+  (( ${#GLOBAL_V6[@]} )) && echo "Global IPv6 prefixes: ${GLOBAL_V6[*]}"
+
+  added=0
+  while IFS='|' read -r cidr port proto; do
+    [[ -n $cidr ]] || continue
+    [[ $cidr == *:* && $SKIP_V6 == yes ]] && continue
+    # Tagged with a comment, the way Omarchy's own installers do it, so every
+    # rule is self-identifying in `sudo ufw status` -- no record kept on the
+    # side, and anyone who finds these rules can see what put them there.
+    run sudo ufw allow from "$cidr" to any port "$port" proto "$proto" \
+      comment "$OMAIRPLAY_UFW_COMMENT"
+    added=$((added + 1))
+  done < <(omairplay_rules "$([[ $WIDE == yes ]] && echo yes || echo no)" ${GLOBAL_V6+"${GLOBAL_V6[@]}"})
+
+  run sudo ufw reload
+  echo "$added rule(s) applied, each tagged \"$OMAIRPLAY_UFW_COMMENT\"."
+  echo "Review them any time with:  sudo ufw status | grep $OMAIRPLAY_UFW_COMMENT"
 fi
 echo
 
@@ -291,9 +202,37 @@ if [[ -n ${SPEAKER_NAME:-} ]]; then
 else
   run "$PLUGIN_DIR/bin/airplay-write-config"
 fi
+# Keep a working copy of the uninstaller outside the plugin folder.
+#
+# `omarchy plugin remove` deletes a git-managed plugin outright, with no
+# backup (omarchy-plugin-remove only backs up plugins that are *not* git
+# checkouts). So removing the plugin would otherwise take the only tool that
+# undoes this setup with it, leaving a running receiver and firewall rules
+# with no way to reverse them from the UI.
+#
+# airplay-remove derives every path from $HOME and references nothing inside
+# the plugin folder, so a copy next to the firewall record works standalone.
+run mkdir -p "$STATE_DIR"
+run install -m 0755 "$PLUGIN_DIR/bin/airplay-remove" "$STATE_DIR/airplay-remove"
+# The unit's audio gate lives here too, so the receiver keeps working even if
+# the plugin is removed. See the comment in share/omarchy-airplay.service.
+run install -m 0755 "$PLUGIN_DIR/bin/airplay-wait-audio" "$STATE_DIR/airplay-wait-audio"
+# airplay-remove sources the rule spec from its own directory, so the copy has
+# to travel with it.
+run install -m 0644 "$PLUGIN_DIR/bin/airplay-firewall-spec" "$STATE_DIR/airplay-firewall-spec"
+
 run mkdir -p "$UNIT_DIR"
-run install -m 0644 "$PLUGIN_DIR/share/omarchy-airplay.service" \
-  "$UNIT_DIR/omarchy-airplay.service"
+# systemd does not expand %h inside Documentation=, so substitute the real home
+# when installing. Everything else in the unit uses %h as normal.
+if [[ $DRY_RUN == yes ]]; then
+  run install -m 0644 "$PLUGIN_DIR/share/omarchy-airplay.service" \
+    "$UNIT_DIR/omarchy-airplay.service"
+else
+  sed "s|/home/USER/|$HOME/|g" "$PLUGIN_DIR/share/omarchy-airplay.service" \
+    >"$UNIT_DIR/omarchy-airplay.service"
+  chmod 0644 "$UNIT_DIR/omarchy-airplay.service"
+  echo "Installed $UNIT_DIR/omarchy-airplay.service"
+fi
 run systemctl --user daemon-reload
 echo
 
@@ -311,4 +250,10 @@ Then look for "$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:
 
 If the speaker appears on the phone but will not connect, the firewall is the
 usual reason. Re-run this setup with --wide.
+
+To undo everything later, use "Remove receiver" in the plugin popup. A copy of
+the uninstaller also lives outside the plugin folder, so it still works if the
+plugin itself is removed first:
+
+    $STATE_DIR/airplay-remove --firewall
 EOM

@@ -1,16 +1,17 @@
 #!/bin/bash
 # Report whether the firewall currently allows AirPlay, as JSON on stdout.
 #
-# Needs no root, which is the whole point: /etc/ufw/user.rules and user6.rules
-# are world-readable, so the plugin can diff the rules that are actually
-# present against the ones this machine needs *right now*. That beats the
-# marker file the handoff planned, because it notices when the answer changes
-# underneath us -- most importantly when the ISP re-delegates the IPv6 prefix
-# and the old rule silently stops matching.
+# Needs no root: /etc/ufw/user.rules and user6.rules are world-readable, so the
+# plugin can compare the rules that are actually present against the ones the
+# shared spec says should exist.
 #
-# Exit status is always 0 when the JSON is valid; read "ok" to get the verdict.
+# Exit status is always 0 when the JSON is valid; read "ok" for the verdict.
 
 set -uo pipefail
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=/dev/null
+source "$HERE/airplay-firewall-spec"
 
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
@@ -31,26 +32,9 @@ UFW_ENABLED=false
 UFW_IPV6=false
 [[ -r /etc/default/ufw ]] && grep -qE '^IPV6=yes' /etc/default/ufw && UFW_IPV6=true
 
-# Same derivation as airplay-setup, so the two cannot disagree about what the
-# local network is.
-DEV="$(ip -o -4 route show default 2>/dev/null | awk '{print $5; exit}')"
-LAN="$(ip -o -4 route show scope link 2>/dev/null \
-  | awk -v dev="$DEV" '$3 == dev {print $1; exit}')"
-
-V6_PREFIXES=()
-if [[ $UFW_IPV6 == true ]]; then
-  V6_PREFIXES+=( "fe80::/10" )
-  while read -r addr; do
-    [[ -n $addr ]] || continue
-    prefix="$(python3 -c '
-import ipaddress, sys
-print(ipaddress.IPv6Network(sys.argv[1] + "/64", strict=False))
-' "$addr" 2>/dev/null)" || continue
-    [[ -n $prefix && $prefix != "::/0" ]] && V6_PREFIXES+=( "$prefix" )
-  done < <(ip -6 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')
-  mapfile -t V6_PREFIXES < <(printf '%s\n' "${V6_PREFIXES[@]}" | awk 'NF && !seen[$0]++')
-fi
-
+# IPv4 rules land in user.rules, IPv6 in user6.rules; both world-readable. The
+# match deliberately ignores anything after "in", so it works whether or not
+# the rule carries a `comment=` tag.
 rule_present() {
   local proto="$1" port="$2" src="$3" file
   if [[ $src == *:* ]]; then file=/etc/ufw/user6.rules; else file=/etc/ufw/user.rules; fi
@@ -61,58 +45,37 @@ rule_present() {
   grep -qE "^### tuple ### allow ${proto} ${port_re} [^ ]+ any ${src_re} in" "$file"
 }
 
+mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
+[[ $UFW_IPV6 == true ]] || GLOBAL_V6=()
+
 MISSING=()
-if [[ -n $LAN ]]; then
-  read -r LOW HIGH </proc/sys/net/ipv4/ip_local_port_range
-  for spec in "tcp 7000" "udp 319,320" "udp 5353" "tcp $LOW:$HIGH" "udp $LOW:$HIGH"; do
-    read -r proto port <<<"$spec"
-    rule_present "$proto" "$port" "$LAN" \
-      || MISSING+=( "allow from $LAN to any port $port proto $proto" )
-  done
-fi
-for prefix in ${V6_PREFIXES+"${V6_PREFIXES[@]}"}; do
-  rule_present udp "319,320" "$prefix" \
-    || MISSING+=( "allow from $prefix to any port 319,320 proto udp" )
-done
+while IFS='|' read -r cidr port proto; do
+  [[ -n $cidr ]] || continue
+  # Skip IPv6 rules entirely when ufw has IPv6 turned off; they would be
+  # accepted and then ignored.
+  [[ $cidr == *:* && $UFW_IPV6 != true ]] && continue
+  rule_present "$proto" "$port" "$cidr" \
+    || MISSING+=( "allow from $cidr to any port $port proto $proto" )
+done < <(omairplay_rules yes ${GLOBAL_V6+"${GLOBAL_V6[@]}"})
 
-LAN_UNKNOWN=false
-[[ -n ${LAN:-} ]] || LAN_UNKNOWN=true
-
-# "ok" means "no reason to warn the user", not "everything was verified".
-#
-# A firewall that is off blocks nothing. And when the local subnet cannot be
-# worked out, the honest answer is "did not check" -- NOT "blocking". A VPN as
-# the default route lands there: the derivation follows the default route to
-# find the local subnet, and a tunnel has none. But the ufw rules key on
-# *source address*, so they carry on matching LAN traffic no matter where the
-# default route points, and AirPlay keeps working. Reporting that as a blocked
-# firewall was a false alarm repeating every 60s, which is worse than silence:
-# it trains you to ignore the one warning that does matter.
+# "ok" means "no reason to warn", not "everything was verified". A firewall
+# that is off blocks nothing.
 OK=false
 if [[ $UFW_PRESENT == false || $UFW_ENABLED == false ]]; then
-  OK=true
-elif [[ $LAN_UNKNOWN == true ]]; then
   OK=true
 elif (( ${#MISSING[@]} == 0 )); then
   OK=true
 fi
 
 REASON=""
-if [[ $LAN_UNKNOWN == true ]]; then
-  # Reported for diagnostics; deliberately does not raise a warning.
-  REASON="Local subnet unknown, so the firewall was not checked. A VPN is the usual reason."
-elif [[ $OK == false ]]; then
-  REASON="${#MISSING[@]} firewall rule(s) missing"
-fi
+[[ $OK == false ]] && REASON="${#MISSING[@]} firewall rule(s) missing"
 
 printf '{'
 printf '"ok":%s,' "$OK"
 printf '"ufw_present":%s,' "$UFW_PRESENT"
 printf '"ufw_enabled":%s,' "$UFW_ENABLED"
 printf '"ufw_ipv6":%s,' "$UFW_IPV6"
-printf '"lan":"%s",' "$(json_escape "${LAN:-}")"
-printf '"lan_unknown":%s,' "$LAN_UNKNOWN"
-printf '"v6_prefixes":%s,' "$(json_array ${V6_PREFIXES+"${V6_PREFIXES[@]}"})"
+printf '"global_v6":%s,' "$(json_array ${GLOBAL_V6+"${GLOBAL_V6[@]}"})"
 printf '"missing":%s,' "$(json_array ${MISSING+"${MISSING[@]}"})"
 printf '"reason":"%s"' "$(json_escape "$REASON")"
 printf '}\n'

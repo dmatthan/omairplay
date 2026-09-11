@@ -2,6 +2,19 @@
 Description=AirPlay receiver (Shairport Sync, Omarchy plugin)
 Documentation=man:shairport-sync(1)
 
+# Installed by the OmairPlay plugin for Omarchy.
+#
+# If you have found this unit running and no longer have the plugin, everything
+# it set up -- this service, its config, and the firewall rules it added -- can
+# be undone with the uninstaller kept outside the plugin folder:
+#
+#   ~/.local/state/io.github.dmatthan.omairplay/airplay-remove --firewall
+#
+# Every firewall rule it added is tagged, so you can also see them directly:
+#
+#   sudo ufw status | grep omairplay
+Documentation=file:///home/USER/.local/state/io.github.dmatthan.omairplay/airplay-remove
+
 # pipewire-pulse is socket-activated, so order after the socket as well as the
 # service: "the service is active" is a weaker statement than "the socket is
 # there", and neither proves the server will answer -- see the ExecStartPre gate.
@@ -54,7 +67,13 @@ ExecStartPre=/usr/bin/systemctl is-active -q nqptp.service
 # The gate holds the receiver back until pipewire-pulse has been continuously
 # up for a while, so it attaches to the instance that is going to survive.
 # See the script -- it documents the three attempts this took.
-ExecStartPre=%h/.config/omarchy/plugins/io.github.dmatthan.omairplay/bin/airplay-wait-audio 45 12
+# Note the path: this helper is installed by setup into the state directory,
+# NOT referenced inside the plugin folder. `omarchy plugin remove` deletes a
+# git-managed plugin outright, and a missing ExecStartPre fails the unit -- so
+# pointing at the plugin folder meant removing the plugin silently broke the
+# receiver on the next login. systemd owns the receiver; it should not depend
+# on the plugin being present.
+ExecStartPre=%h/.local/state/io.github.dmatthan.omairplay/airplay-wait-audio 45 12
 
 ExecStart=/usr/bin/shairport-sync -c %h/.config/shairport-sync/shairport-sync.conf
 Restart=on-failure

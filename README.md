@@ -39,8 +39,12 @@ password prompt. It:
 2. Installs `shairport-sync` and `nqptp`.
 3. Enables `nqptp` as a **system** service — it needs privileged ports 319 and
    320 for AirPlay 2 clock sync.
-4. Adds `ufw` rules **scoped to your local subnet**, never to Anywhere. Every
-   rule is logged with the command that removes it.
+4. Adds `ufw` rules **limited to private networks**, never to Anywhere. Each one
+   is tagged `omairplay`, so you can always see what added it:
+
+   ```bash
+   sudo ufw status | grep omairplay
+   ```
 5. Writes the receiver's config and a user service under `$HOME`.
 
 **The plugin itself never needs root while running.** Only setup and removal do,
@@ -105,15 +109,33 @@ current addresses.
 
 ## Removing it
 
-**Remove receiver** in the popup stops the receiver, disables it at login,
-deletes its config and cover-art cache, and removes the firewall rules it added.
-The `shairport-sync` and `nqptp` packages are left installed.
+Two steps, and the order matters.
 
-To remove the plugin as well:
+1. **Remove receiver** in the popup. This undoes the setup: it stops the
+   receiver, disables it at login, deletes its config and cover-art cache, and
+   removes the firewall rules it added.
+2. Then remove the plugin itself:
+
+   ```bash
+   omarchy plugin remove io.github.dmatthan.omairplay
+   ```
+
+If you remove the plugin first, setup has already put a standalone copy of the
+uninstaller outside the plugin folder, so it still works:
 
 ```bash
-omarchy plugin remove io.github.dmatthan.omairplay
+~/.local/state/io.github.dmatthan.omairplay/airplay-remove --firewall
 ```
+
+Because every rule it adds is tagged, the uninstaller finds them by that tag
+rather than from a saved list — so it also clears up rules left by an older
+version, or for a network you are no longer on.
+
+`omarchy plugin remove` only deletes files — Omarchy never runs plugin code when
+adding or removing a plugin, and never does so with root. Undoing the firewall
+needs root, so it stays a deliberate, visible step rather than a side effect.
+
+The `shairport-sync` and `nqptp` packages are left installed either way.
 
 ## Notes on safety
 
@@ -123,12 +145,14 @@ permissions — this one included. What that means here:
 - Root is used only by `bin/airplay-setup` and `bin/airplay-remove`, both run
   visibly in a terminal. Neither is invoked with `pkexec`: the plugin folder is
   user-writable, so running a script from it as root would be a way to escalate.
-- Firewall rules are always scoped to the local subnet, derived at runtime from
-  the routing table. Nothing is opened to Anywhere, and `ufw` is never disabled
-  or reset.
-- Removal validates each recorded rule against the exact shape setup writes,
-  and rebuilds the command from the matched fields rather than executing a line
-  from a file.
+- Firewall rules are limited to private address ranges (RFC1918, plus IPv6
+  link-local and unique-local), following the same convention as Omarchy's own
+  installers. Nothing is opened to Anywhere, and `ufw` is never disabled or
+  reset. The one wide rule — the kernel ephemeral range that AirPlay 2 uses for
+  its audio channels — is narrowed further, to only the private ranges this
+  machine actually holds an address in.
+- Removal works from the `omairplay` tag on each rule, so it needs no saved
+  list and never executes a command read from a file.
 - Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable,
   so checking it needs no privilege.
 - Your local network is the trust boundary: a device has to be on it to reach

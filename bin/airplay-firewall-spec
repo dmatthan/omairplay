@@ -1,0 +1,108 @@
+#!/bin/bash
+# The complete firewall rule set for the AirPlay receiver, in one place.
+#
+# Sourced by airplay-setup, airplay-check-firewall and airplay-remove, so the
+# three can never disagree about which rules exist. Not executable on its own.
+#
+# Follows the conventions of Omarchy's own installers -- see
+# omarchy-install-service-sunshine and omarchy-setup-security-sshd:
+#
+#   * every rule carries a `comment` tag, so it is self-identifying in
+#     `sudo ufw status` without needing any record kept on the side
+#   * fixed RFC1918 ranges rather than inspecting the routing table. Broader
+#     than one subnet, but immune to a VPN replacing the default route, and it
+#     needs no derivation code in three places
+#   * removal re-issues the same spec with `ufw --force delete`, so it is
+#     idempotent and tolerant of rules already gone
+
+OMAIRPLAY_UFW_COMMENT="omairplay"
+
+# Exactly the list Omarchy uses for Sunshine.
+OMAIRPLAY_V4_CIDRS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16)
+
+# Link-local and all unique-local addresses. Static, so no prefix change can
+# invalidate them. A globally-routable prefix is not covered here and is added
+# separately by airplay-setup, because it is the one value that must be read
+# from the machine.
+OMAIRPLAY_V6_CIDRS=(fe80::/10 fc00::/7)
+
+# "<ports>:<proto>". Ports are combined per protocol to keep the rule count
+# down: 7000 is AirPlay 2's RTSP listener, 319 and 320 are nqptp's PTP clock
+# sync, and 5353 is mDNS.
+OMAIRPLAY_V4_PORTS=("7000:tcp" "319,320,5353:udp")
+OMAIRPLAY_V6_PORTS=("319,320:udp")
+
+# Emit every rule as "<cidr>|<ports>|<proto>", one per line.
+#
+#   $1  "yes" to include the ephemeral range (AirPlay 2's data channels; see
+#       README). Read from the kernel rather than hardcoded, because the range
+#       differs between machines.
+#   $2… additional CIDRs, for the globally-routable IPv6 prefixes that
+#       airplay-setup derives at runtime.
+omairplay_rules() {
+  local wide="${1:-no}"; shift || true
+  local extra=("$@")
+  local cidr spec low high
+
+  for cidr in "${OMAIRPLAY_V4_CIDRS[@]}"; do
+    for spec in "${OMAIRPLAY_V4_PORTS[@]}"; do
+      printf '%s|%s|%s\n' "$cidr" "${spec%:*}" "${spec##*:}"
+    done
+  done
+
+  for cidr in "${OMAIRPLAY_V6_CIDRS[@]}" ${extra+"${extra[@]}"}; do
+    for spec in "${OMAIRPLAY_V6_PORTS[@]}"; do
+      printf '%s|%s|%s\n' "$cidr" "${spec%:*}" "${spec##*:}"
+    done
+  done
+
+  if [[ $wide == yes ]]; then
+    read -r low high </proc/sys/net/ipv4/ip_local_port_range
+    # Narrowed deliberately. The ports above are a handful of specific numbers,
+    # so opening them across all three RFC1918 ranges costs little and matches
+    # what Omarchy does. This is a ~28,000-port range, which is a different
+    # proposition: restrict it to the private ranges this machine actually has
+    # an address in. Still no routing-table lookup, so still VPN-proof.
+    for cidr in $(omairplay_present_v4_cidrs); do
+      printf '%s|%s:%s|tcp\n' "$cidr" "$low" "$high"
+      printf '%s|%s:%s|udp\n' "$cidr" "$low" "$high"
+    done
+  fi
+}
+
+# Which of the RFC1918 ranges this machine actually holds an address in. Reads
+# interface addresses, never the routing table, so a VPN cannot mislead it.
+omairplay_present_v4_cidrs() {
+  local addr cidr
+  local -a present=()
+  while read -r addr; do
+    for cidr in "${OMAIRPLAY_V4_CIDRS[@]}"; do
+      if python3 -c '
+import ipaddress, sys
+sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2]) else 1)
+' "$addr" "$cidr" 2>/dev/null; then
+        present+=("$cidr")
+      fi
+    done
+  done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')
+  printf '%s\n' ${present+"${present[@]}"} | awk 'NF && !seen[$0]++'
+}
+
+# The globally-routable IPv6 /64s this machine currently has, if any. The only
+# part of the rule set that cannot be a constant.
+omairplay_global_v6_prefixes() {
+  local addr prefix
+  while read -r addr; do
+    [[ -n $addr ]] || continue
+    prefix="$(python3 -c '
+import ipaddress, sys
+print(ipaddress.IPv6Network(sys.argv[1] + "/64", strict=False))
+' "$addr" 2>/dev/null)" || continue
+    # A ULA is already covered by fc00::/7; skip it rather than duplicate.
+    case "$prefix" in
+      ::/0|fd*|fc*) continue ;;
+    esac
+    printf '%s\n' "$prefix"
+  done < <(ip -6 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}') \
+    | awk 'NF && !seen[$0]++'
+}
