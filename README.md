@@ -133,6 +133,29 @@ by that tag.
 
 The `shairport-sync` and `nqptp` packages stay installed.
 
+## What it puts on your system
+
+Everything, in one place:
+
+| Path | What it is |
+|---|---|
+| `~/.config/shairport-sync/shairport-sync.conf` | the receiver's config, generated from your settings |
+| `~/.config/systemd/user/omarchy-airplay.service` | the user service that runs the receiver |
+| `~/.cache/shairport-sync/` | cover art the receiver receives |
+| `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller, the audio-readiness helper the service runs, and a note recording whether setup enabled `nqptp` |
+| `ufw` rules | 11, each tagged `omairplay`, private ranges only |
+| `nqptp.service` | enabled, for AirPlay 2 clock sync |
+| `shairport-sync`, `nqptp` | packages, from Arch `extra` |
+
+Nothing is written outside `$HOME` apart from those last three. No autostart
+entries, no `PATH` changes, no shell-profile edits, no scheduled jobs.
+
+The two executables in `~/.local/state/` are there on purpose: removing the
+plugin deletes its folder, and the receiver would stop working if its service
+pointed into it. Keeping them outside means the service survives, and the
+uninstaller is still available to undo the firewall rules and the `nqptp`
+service afterwards. Both are removed when the uninstaller finishes.
+
 ## Notes on safety
 
 Omarchy plugins run unsandboxed inside the shell process, with your user's
