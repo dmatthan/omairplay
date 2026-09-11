@@ -1,0 +1,314 @@
+#!/bin/bash
+# One-time privileged setup for the Omarchy AirPlay receiver plugin.
+#
+# Runs visibly in Omarchy's floating terminal, which is where a password prompt
+# belongs. The plugin itself never needs root at runtime, and never calls this
+# with pkexec: the user can write to this file, so running it as root from a
+# path the user controls would be a way to escalate.
+#
+# Idempotent: every step checks before it acts, so re-running is safe.
+#
+# Usage:
+#   airplay-setup                 minimal firewall rules (try this first)
+#   airplay-setup --wide          also allow LAN-scoped ephemeral TCP and UDP
+#   airplay-setup --dry-run       print every command, change nothing
+#
+# --wide is needed on this machine. AirPlay 2 opens its data channels as
+# *TCP* listeners on kernel ephemeral ports, which nothing narrower covers:
+# udp_port_base/udp_port_range are AirPlay 1 only. Confirmed from [UFW BLOCK]
+# entries showing the phone's SYNs to ports 50545, 36527, 35193, 37865 and
+# 55923 being dropped.
+
+set -euo pipefail
+
+WIDE="no"
+DRY_RUN="no"
+while (( $# )); do
+  case "$1" in
+    --wide)     WIDE="yes"; shift ;;
+    --wide-udp) WIDE="yes"; shift ;;   # old name, kept so notes stay runnable
+    --dry-run)  DRY_RUN="yes"; shift ;;
+    *) echo "airplay-setup: unknown argument '$1'" >&2; exit 2 ;;
+  esac
+done
+
+PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/io.github.dmatthan.omairplay"
+MARKER="$STATE_DIR/firewall-configured"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+warn()  { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+fail()  { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+
+# Every privileged command goes through here, so --dry-run is honest and the
+# log in NOTES.md can be generated from one place.
+run() {
+  printf '\033[36m$ %s\033[0m\n' "$*"
+  [[ $DRY_RUN == yes ]] && return 0
+  "$@"
+}
+
+bold "Omarchy AirPlay receiver setup"
+echo
+
+# ---------------------------------------------------------------- safety gate
+# Safety rule 4: no other shairport-sync may be running. A machine gets exactly
+# one AirPlay 2 slot, and two instances would also fight over port 7000.
+#
+# There are two units to worry about, not one. The Arch package ships both:
+#   /usr/lib/systemd/system/shairport-sync.service  (runs as user shairport-sync)
+#   /usr/lib/systemd/user/shairport-sync.service    (preset: enabled)
+# Ours is omarchy-airplay.service, deliberately named differently so it cannot
+# shadow the packaged user unit.
+if systemctl is-enabled shairport-sync.service &>/dev/null \
+   || systemctl is-active shairport-sync.service &>/dev/null; then
+  fail "The system-wide shairport-sync.service is enabled or running. This
+plugin runs a *user* service, and the two would fight over port 7000 and over
+the machine's single AirPlay 2 slot. Disable it first:
+
+    sudo systemctl disable --now shairport-sync.service
+
+then run this setup again."
+fi
+
+if systemctl --user is-enabled shairport-sync.service &>/dev/null \
+   || systemctl --user is-active shairport-sync.service &>/dev/null; then
+  fail "The packaged *user* unit shairport-sync.service is enabled or running.
+It reads /etc/shairport-sync.conf, which this plugin does not manage, and it
+would fight this plugin's receiver over port 7000. Disable it first:
+
+    systemctl --user disable --now shairport-sync.service
+
+then run this setup again."
+fi
+
+# ------------------------------------------------------------------- snapshot
+# Safety rule 2. omarchy-snapshot exits 127 when snapper is absent and 1 when
+# snapper is installed but has no configs; both mean "no snapshot was taken".
+if command -v omarchy-snapshot >/dev/null; then
+  bold "1. System snapshot"
+  if ! run omarchy-snapshot create; then
+    warn "No snapshot was created (snapper missing or unconfigured)."
+    read -rp "Continue without a snapshot? [y/N] " reply
+    [[ ${reply,,} == y ]] || fail "Stopped at your request. Nothing was changed."
+  fi
+else
+  warn "omarchy-snapshot not found, so no snapshot was created."
+  read -rp "Continue without a snapshot? [y/N] " reply
+  [[ ${reply,,} == y ]] || fail "Stopped at your request. Nothing was changed."
+fi
+echo
+
+# ------------------------------------------------------------------- packages
+bold "2. Packages"
+if pacman -Q shairport-sync nqptp &>/dev/null; then
+  echo "shairport-sync and nqptp are already installed."
+else
+  run omarchy-pkg-add shairport-sync nqptp
+fi
+echo
+
+# ---------------------------------------------------------------------- nqptp
+# nqptp binds UDP 319 and 320, which are privileged ports, so this one really
+# does have to be a system service. It carries no audio and exposes no control
+# interface. Safety rule 4 allows exactly this.
+bold "3. nqptp (system service, needs ports 319 and 320)"
+if [[ "$(systemctl is-enabled nqptp.service 2>/dev/null)" == "enabled" ]]; then
+  echo "nqptp.service is already enabled."
+else
+  run sudo systemctl enable nqptp.service
+fi
+if systemctl is-active nqptp.service &>/dev/null; then
+  echo "nqptp.service is already running."
+else
+  run sudo systemctl start nqptp.service
+fi
+echo
+
+# ------------------------------------------------------------------- firewall
+# Safety rule 3: LAN-scoped only, never Anywhere, never `ufw disable`/`reset`,
+# and every rule logged with the command that removes it.
+bold "4. Firewall"
+
+# Derive the LAN from the default route rather than hardcoding it. This machine
+# is on a USB wifi adapter, so the interface name can change between ports;
+# the subnet is the stable thing to scope to.
+LAN_CIDR="$(ip -o -4 route show scope link \
+  | awk -v dev="$(ip -o -4 route show default | awk '{print $5; exit}')" \
+      '$3 == dev {print $1; exit}')"
+
+if [[ -z ${LAN_CIDR:-} || $LAN_CIDR == "0.0.0.0/0" ]]; then
+  fail "Could not work out which subnet is your local network, and this script
+will not fall back to opening ports to Anywhere.
+
+The usual cause is a VPN: the local subnet is found by following the default
+route, and a VPN tunnel replaces that route with its own. Disconnect the VPN
+and run setup again -- the rules it adds keep working once you reconnect,
+because they match on source address rather than on routing."
+fi
+echo "Local subnet: $LAN_CIDR"
+
+UFW_RULES=(
+  "allow from $LAN_CIDR to any port 7000 proto tcp"
+  "allow from $LAN_CIDR to any port 319,320 proto udp"
+  "allow from $LAN_CIDR to any port 5353 proto udp"
+)
+
+# IPv6 is not optional here, which the handoff did not anticipate. The phone
+# reaches for PTP timing (319/320) over IPv6 even when it finds the receiver
+# over IPv4, and PTP is what keeps AirPlay 2 in sync -- so dropping it breaks
+# playback even when the audio path itself is fine.
+#
+# Scope each rule to a genuinely local prefix, derived at runtime:
+#   fe80::/10  link-local, cannot be routed off-link by definition
+#   fd00::/8   unique local addresses, not globally routable
+#   the /64 of each global address, i.e. this LAN's own subnet
+#
+# The global /64 is the fragile one: it comes from the ISP and changes if the
+# prefix is re-delegated, at which point these rules silently stop matching.
+# That is one of the things the plugin's firewall hint is for. Re-running this
+# setup re-derives it.
+V6_PREFIXES=( "fe80::/10" )
+while read -r addr; do
+  [[ -n $addr ]] || continue
+  prefix="$(python3 -c '
+import ipaddress, sys
+print(ipaddress.IPv6Network(sys.argv[1] + "/64", strict=False))
+' "$addr" 2>/dev/null)" || continue
+  [[ -n $prefix ]] || continue
+  # Never let a mis-derived prefix become a rule open to the whole internet.
+  [[ $prefix == "::/0" ]] && continue
+  V6_PREFIXES+=( "$prefix" )
+done < <(ip -6 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')
+
+# De-duplicate, since two addresses can share a /64.
+mapfile -t V6_PREFIXES < <(printf '%s\n' "${V6_PREFIXES[@]}" | awk '!seen[$0]++')
+
+for prefix in "${V6_PREFIXES[@]}"; do
+  UFW_RULES+=( "allow from $prefix to any port 319,320 proto udp" )
+done
+
+# AirPlay 2 opens its data channels on kernel ephemeral ports and cannot be
+# told to pin them, so there is nothing narrower to ask for than this machine's
+# own ephemeral range -- still scoped to the LAN, never to Anywhere. Both
+# protocols: the listeners observed on this machine were TCP.
+if [[ $WIDE == yes ]]; then
+  read -r LOW HIGH </proc/sys/net/ipv4/ip_local_port_range
+  UFW_RULES+=(
+    "allow from $LAN_CIDR to any port $LOW:$HIGH proto tcp"
+    "allow from $LAN_CIDR to any port $LOW:$HIGH proto udp"
+  )
+fi
+
+mkdir -p "$STATE_DIR"
+: >"$MARKER.tmp"
+{
+  echo "# ufw rules added by airplay-setup on $(date -Is)"
+  echo "# Subnet: $LAN_CIDR"
+  echo "#"
+  echo "# Remove every one of them with:"
+} >>"$MARKER.tmp"
+
+# `ufw status` needs root, but /etc/ufw/user.rules is world-readable, so the
+# "is this rule already here?" check costs no password at all. ufw records each
+# rule as a tuple line:
+#
+#   ### tuple ### allow tcp 7000 0.0.0.0/0 any 192.168.0.0/24 in
+#                       ^     ^                ^
+#                       proto dport            source
+# IPv4 rules land in user.rules, IPv6 rules in user6.rules. Both are
+# world-readable, so check whichever matches the rule's address family.
+ufw_rule_present() {
+  local proto="$1" port="$2" src="$3" file
+  if [[ $src == *:* ]]; then
+    file=/etc/ufw/user6.rules
+  else
+    file=/etc/ufw/user.rules
+  fi
+  [[ -r $file ]] || return 1
+  # The source is a literal in the tuple, so quote the regex metacharacters in
+  # it -- an unescaped "::/0" or a "." would otherwise match too much.
+  local src_re
+  src_re="$(printf '%s' "$src" | sed -e 's/[].[^$*\\]/\\&/g')"
+  local port_re
+  port_re="$(printf '%s' "$port" | sed -e 's/[].[^$*\\]/\\&/g')"
+  grep -qE "^### tuple ### allow ${proto} ${port_re} [^ ]+ any ${src_re} in" "$file"
+}
+
+for rule in "${UFW_RULES[@]}"; do
+  # "allow from <src> to any port <port> proto <proto>"
+  read -r _ _ src _ _ _ port _ proto <<<"$rule"
+  if ufw_rule_present "$proto" "$port" "$src"; then
+    echo "Already present: ufw $rule"
+  else
+    # shellcheck disable=SC2086
+    run sudo ufw $rule
+  fi
+  echo "sudo ufw delete $rule" >>"$MARKER.tmp"
+done
+
+if [[ $DRY_RUN == yes ]]; then
+  rm -f "$MARKER.tmp"
+else
+  mv -f "$MARKER.tmp" "$MARKER"
+  echo
+  echo "Rules and their delete commands logged to:"
+  echo "  $MARKER"
+fi
+echo
+
+# -------------------------------------------------------------- user service
+bold "5. Receiver (user service, no root)"
+
+# Regenerate the config with the name the plugin has persisted, not the
+# generator's default. Setup runs after "Remove receiver" too, and the removal
+# deletes the config while leaving the plugin's shell.json entry intact -- so
+# without this, reinstalling silently reset the speaker's name to
+# "Omarchy Speaker" while the popup's own setting still said something else.
+SPEAKER_NAME="$(python3 - <<'PYEOF' 2>/dev/null || true
+import json, os
+path = os.path.expanduser("~/.config/omarchy/shell.json")
+try:
+    with open(path) as fh:
+        config = json.load(fh)
+except Exception:
+    raise SystemExit(0)
+layout = (config.get("bar") or {}).get("layout") or {}
+for entries in layout.values():
+    for entry in entries or []:
+        if isinstance(entry, dict) and entry.get("id") == "io.github.dmatthan.omairplay":
+            name = str(entry.get("speakerName") or "").strip()
+            if name:
+                print(name)
+            raise SystemExit(0)
+PYEOF
+)"
+
+if [[ -n ${SPEAKER_NAME:-} ]]; then
+  echo "Using the speaker name from your plugin settings: $SPEAKER_NAME"
+  run "$PLUGIN_DIR/bin/airplay-write-config" --name "$SPEAKER_NAME"
+else
+  run "$PLUGIN_DIR/bin/airplay-write-config"
+fi
+run mkdir -p "$UNIT_DIR"
+run install -m 0644 "$PLUGIN_DIR/share/omarchy-airplay.service" \
+  "$UNIT_DIR/omarchy-airplay.service"
+run systemctl --user daemon-reload
+echo
+
+bold "Setup done."
+cat <<EOM
+
+The receiver is installed but not started. Turn it on from the plugin popup,
+or by hand with:
+
+    systemctl --user start omarchy-airplay
+
+Then look for "$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync/shairport-sync.conf" 2>/dev/null \
+  | head -1)" in the AirPlay list on your phone.
+
+If the speaker appears on the phone but will not connect, the firewall is the
+usual reason. Re-run this setup with --wide.
+EOM

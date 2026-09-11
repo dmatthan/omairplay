@@ -1,0 +1,73 @@
+#!/bin/bash
+# Report the receiver's state as JSON on stdout. Unprivileged and read-only.
+#
+# One process per refresh rather than six: the widget polls this on a timer,
+# and a bar widget should not fork a handful of processes every few seconds.
+
+set -uo pipefail
+
+UNIT="omarchy-airplay.service"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync/shairport-sync.conf"
+UNIT_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
+
+bool() { [[ $1 == 0 ]] && printf 'true' || printf 'false'; }
+
+command -v shairport-sync >/dev/null; BINARY=$?
+[[ -f $UNIT_PATH ]]; UNIT_FILE=$?
+[[ -f $CONFIG ]]; CONFIG_FILE=$?
+
+ACTIVE="$(systemctl --user is-active "$UNIT" 2>/dev/null)"
+UNITFILE="$(systemctl --user is-enabled "$UNIT" 2>/dev/null)"
+
+# Safety rule 4: anything else holding the AirPlay 2 slot is a conflict, and
+# there are two candidates -- the packaged system unit and the packaged *user*
+# unit, whose preset is "enabled".
+SYS=false
+systemctl is-active shairport-sync.service &>/dev/null && SYS=true
+systemctl is-enabled shairport-sync.service &>/dev/null && SYS=true
+PKG=false
+systemctl --user is-active shairport-sync.service &>/dev/null && PKG=true
+systemctl --user is-enabled shairport-sync.service &>/dev/null && PKG=true
+
+# The name the receiver is actually advertising, read back from the generated
+# config rather than from the plugin's settings -- so the popup can tell the
+# difference between "you typed a new name" and "the receiver has that name".
+NAME=""
+if [[ -r $CONFIG ]]; then
+  NAME="$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
+    "$CONFIG" | head -1)"
+  # Undo the libconfig escaping airplay-write-config applies.
+  NAME="${NAME//\\\"/\"}"
+  NAME="${NAME//\\\\/\\}"
+fi
+
+# The config is only read at startup, so a config written *after* the receiver
+# started is a name (or backend) change that has not taken effect yet. Without
+# this the popup would happily show the new name while the receiver kept
+# broadcasting the old one -- which is a genuinely confusing state to be in.
+STALE=false
+if [[ -f $CONFIG ]] && [[ $ACTIVE == active ]]; then
+  STARTED="$(systemctl --user show "$UNIT" -p ActiveEnterTimestamp --value 2>/dev/null)"
+  if [[ -n $STARTED ]]; then
+    STARTED_EPOCH="$(date -d "$STARTED" +%s 2>/dev/null)"
+    CONFIG_EPOCH="$(stat -c %Y "$CONFIG" 2>/dev/null)"
+    if [[ -n $STARTED_EPOCH && -n $CONFIG_EPOCH ]] \
+       && (( CONFIG_EPOCH > STARTED_EPOCH )); then
+      STALE=true
+    fi
+  fi
+fi
+
+json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+printf '{'
+printf '"binary":%s,' "$(bool $BINARY)"
+printf '"unit":%s,' "$(bool $UNIT_FILE)"
+printf '"config":%s,' "$(bool $CONFIG_FILE)"
+printf '"active":"%s",' "$(json_escape "${ACTIVE:-unknown}")"
+printf '"unit_file":"%s",' "$(json_escape "${UNITFILE:-unknown}")"
+printf '"system_unit_busy":%s,' "$SYS"
+printf '"packaged_unit_busy":%s,' "$PKG"
+printf '"advertised_name":"%s",' "$(json_escape "$NAME")"
+printf '"config_stale":%s' "$STALE"
+printf '}\n'

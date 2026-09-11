@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.dmatthan.omairplay",
+  "name": "OmairPlay",
+  "version": "0.1.0",
+  "author": "dmatthan",
+  "license": "MIT",
+  "description": "Turns this machine into an AirPlay speaker. The phone is the player and this machine is the output; this is not a remote control.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmairPlay",
+    "description": "Receiver on/off, start at login, speaker name, and what the phone is playing.",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "speakerName": "Omarchy Speaker",
+      "refreshIntervalSec": 5,
+      "showArtwork": true
+    },
+    "schema": [
+      {
+        "key": "speakerName",
+        "type": "string",
+        "label": "Speaker name",
+        "defaultValue": "Omarchy Speaker"
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Status refresh interval (seconds)",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
+      },
+      {
+        "key": "showArtwork",
+        "type": "boolean",
+        "label": "Show cover art",
+        "defaultValue": true
+      }
+    ]
+  }
+}

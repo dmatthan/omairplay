@@ -1,0 +1,75 @@
+[Unit]
+Description=AirPlay receiver (Shairport Sync, Omarchy plugin)
+Documentation=man:shairport-sync(1)
+
+# pipewire-pulse is socket-activated, so order after the socket as well as the
+# service: "the service is active" is a weaker statement than "the socket is
+# there", and neither proves the server will answer -- see the ExecStartPre gate.
+After=pipewire-pulse.socket pipewire-pulse.service wireplumber.service
+Wants=pipewire-pulse.service
+
+# shairport-sync holds its PulseAudio context from startup and never
+# reconnects, so it cannot survive pipewire-pulse going away: it keeps running
+# attached to a dead server and fails only when a device tries to play.
+# PartOf propagates a stop or restart of pipewire-pulse to this unit, so the
+# receiver is taken down with the server rather than left silently broken.
+# The ExecStartPre gate is what keeps this from firing during the restart the
+# session performs a few seconds into every login.
+PartOf=pipewire-pulse.service
+
+# At login this user service can start before the *system* services it asserts
+# below are up, especially while the network is still coming together. Each
+# failed assertion counts as a start attempt, and systemd's defaults
+# (StartLimitBurst=5 in a 10s window) would give up after about twenty seconds
+# and sit there failed. With RestartSec=5s this allows roughly a hundred
+# seconds of patient retrying.
+StartLimitIntervalSec=120
+StartLimitBurst=20
+
+# Deliberately NOT called shairport-sync.service. The Arch package ships its
+# own user unit at /usr/lib/systemd/user/shairport-sync.service, and a file of
+# that name in ~/.config/systemd/user would silently shadow it. Worse, that
+# unit's preset is "enabled", so a `systemctl --user preset-all` could start it
+# against /etc/shairport-sync.conf and fight this one over port 7000. A
+# distinct name keeps the two clearly separate, and leaves the packaged unit
+# working for anyone who wants it.
+#
+# The system-wide shairport-sync.service must also stay disabled: a machine
+# gets only one AirPlay 2 slot. airplay-setup refuses to run while either the
+# system unit or the packaged user unit is enabled.
+
+[Service]
+Type=simple
+
+# A user unit cannot depend on a system unit, and both of these have to be
+# system-wide: avahi owns mDNS, and nqptp binds the privileged ports 319 and
+# 320. So assert them instead and fail fast with a legible reason, which is the
+# trick the packaged user unit uses.
+ExecStartPre=/usr/bin/systemctl is-active -q avahi-daemon.service
+ExecStartPre=/usr/bin/systemctl is-active -q nqptp.service
+
+# And wait for the audio server to be usable *and settled*. Ordering is not
+# enough, and neither is waiting for a sink: pipewire-pulse restarts about five
+# seconds into every login, after this unit has already started and connected.
+# The gate holds the receiver back until pipewire-pulse has been continuously
+# up for a while, so it attaches to the instance that is going to survive.
+# See the script -- it documents the three attempts this took.
+ExecStartPre=%h/.config/omarchy/plugins/io.github.dmatthan.omairplay/bin/airplay-wait-audio 45 12
+
+ExecStart=/usr/bin/shairport-sync -c %h/.config/shairport-sync/shairport-sync.conf
+Restart=on-failure
+RestartSec=5s
+
+# shairport-sync in a wedged audio state ignores SIGTERM. The default 90s stop
+# timeout meant turning the receiver off took a minute and a half, during which
+# the plugin was busy and every click on the toggle was silently dropped.
+# Ten seconds, then SIGKILL.
+TimeoutStopSec=10
+
+# No LimitRTPRIO here, unlike the packaged system unit. On this machine
+# `ulimit -Hr` is 0 and the user is not in the `audio` group, so asking for
+# realtime priority would fail to apply. Audio leaves us through
+# pipewire-pulse, which carries its own realtime scheduling via rtkit.
+
+[Install]
+WantedBy=default.target

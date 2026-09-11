@@ -1,0 +1,91 @@
+#!/bin/bash
+# Block until the audio server is both usable and settled, or give up.
+#
+# Used as an ExecStartPre gate, and it took three attempts to get right --
+# the history matters, because the obvious fixes are all too weak:
+#
+#  1. `pactl info` only proves the socket is listening. At login that is true
+#     almost immediately, so it passes while there is still no device.
+#  2. Waiting for a real sink is better, but still not enough.
+#  3. The actual problem: **pipewire-pulse restarts about five seconds into
+#     every login**, once the session has finished importing its environment.
+#     Observed identically on two consecutive boots:
+#
+#         15:25:16  Started PipeWire PulseAudio.
+#         15:25:18  Started AirPlay receiver.      <- context connected here
+#         15:25:21  Stopping PipeWire PulseAudio...
+#         15:25:21  Started PipeWire PulseAudio.   <- different instance
+#
+#     shairport-sync holds its PulseAudio context from startup and never
+#     reconnects, so it survives that restart attached to a server that is
+#     gone. Nothing looks wrong until a device actually connects, at which
+#     point the stream open fails:
+#
+#         fatal error: could not connect to the pulseaudio playback stream
+#         -- the error message is "Bad state".
+#
+#     and shairport-sync logs it without exiting, tearing down its listeners
+#     (port 7000 included) while still advertising over mDNS. The result is a
+#     speaker the phone can see and cannot connect to.
+#
+# So wait for pipewire-pulse to have been continuously up for a while, not
+# merely up. On a running system that is already true and this returns at once;
+# at login it holds the receiver back until after the session's own restart.
+#
+# Run it by hand to see what it decides -- it explains itself.
+
+set -uo pipefail
+
+TIMEOUT="${1:-45}"
+# Comfortably longer than the ~5s restart observed at login.
+MIN_STABLE_SEC="${2:-12}"
+PULSE_UNIT="pipewire-pulse.service"
+
+if ! command -v pactl >/dev/null 2>&1; then
+  # libpulse ships pactl and shairport-sync depends on libpulse, so this should
+  # not happen -- but do not block the receiver over a missing diagnostic tool.
+  echo "airplay-wait-audio: pactl not found, not waiting" >&2
+  exit 0
+fi
+
+# At least one sink that is not PipeWire's `auto_null` dummy placeholder.
+real_sink_present() {
+  local sinks
+  sinks="$(pactl list short sinks 2>/dev/null)" || return 1
+  [[ -n $sinks ]] || return 1
+  awk '$2 != "auto_null" { found = 1 } END { exit found ? 0 : 1 }' <<<"$sinks"
+}
+
+# Seconds pipewire-pulse has been continuously active. Both clocks are
+# monotonic since boot, so this is immune to wall-clock changes.
+pulse_uptime_sec() {
+  local mono up
+  mono="$(systemctl --user show "$PULSE_UNIT" -p ActiveEnterTimestampMonotonic --value 2>/dev/null)"
+  [[ $mono =~ ^[0-9]+$ ]] || return 1
+  (( mono > 0 )) || return 1
+  [[ "$(systemctl --user is-active "$PULSE_UNIT" 2>/dev/null)" == active ]] || return 1
+  up="$(cut -d' ' -f1 /proc/uptime 2>/dev/null)" || return 1
+  awk -v up="$up" -v mono="$mono" 'BEGIN { printf "%d", up - (mono / 1000000) }'
+}
+
+for (( i = 0; i < TIMEOUT; i++ )); do
+  if real_sink_present; then
+    stable="$(pulse_uptime_sec)" || stable=""
+    if [[ -z $stable ]]; then
+      # No usable timestamp (pipewire-pulse not managed as a unit, say). The
+      # sink check has already passed, so do not block on a missing signal.
+      echo "airplay-wait-audio: sink ready; $PULSE_UNIT age unknown, continuing"
+      exit 0
+    fi
+    if (( stable >= MIN_STABLE_SEC )); then
+      echo "airplay-wait-audio: audio ready after ${i}s (sink: $(pactl get-default-sink 2>/dev/null), $PULSE_UNIT stable ${stable}s)"
+      exit 0
+    fi
+  fi
+  sleep 1
+done
+
+echo "airplay-wait-audio: audio did not settle within ${TIMEOUT}s" >&2
+systemctl --user is-active "$PULSE_UNIT" >&2 2>/dev/null || true
+pactl list short sinks >&2 2>/dev/null || true
+exit 1
