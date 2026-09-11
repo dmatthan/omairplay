@@ -130,13 +130,27 @@ else
 fi
 echo
 
-bold "5. Leftover files"
-for f in "$STATE_DIR/airplay-wait-audio" "$STATE_DIR/airplay-firewall-spec" \
-         "$STATE_DIR/firewall-configured" "$STATE_DIR/enabled-nqptp"; do
-  [[ -e $f ]] && run rm -f "$f"
-done
-# Deliberately not deleting this script when it is the copy being run.
-echo "The uninstaller itself is left at $STATE_DIR; delete it when you are done."
+bold "5. Clean up"
+# A script can delete its own file and its own directory and carry on running:
+# the inode stays alive while bash holds the descriptor. Verified with a 47KB
+# script that ran 200 more commands after removing itself. So there is no reason
+# to leave anything behind.
+#
+# The one exception is an unprivileged run, where the firewall rules and the
+# nqptp service are still pending -- the uninstaller and its ownership note are
+# what finish that job, so they stay until they are no longer needed.
+if [[ $DO_SYSTEM == yes ]]; then
+  if [[ $DRY_RUN == yes ]]; then
+    printf '\033[36m$ %s\033[0m\n' "rm -rf $STATE_DIR"
+    echo "Nothing would be left behind."
+  else
+    rm -rf "$STATE_DIR"
+    echo "Removed $STATE_DIR, this uninstaller included. Nothing is left behind."
+  fi
+else
+  echo "Keeping $STATE_DIR for now: it holds this uninstaller, which you still"
+  echo "need to undo the firewall rules and the nqptp service."
+fi
 echo
 
 bold "Done."
