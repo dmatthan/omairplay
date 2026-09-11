@@ -4,8 +4,8 @@
 
 Turn your Omarchy machine into an AirPlay speaker.
 
-Your phone stays the player; this machine is the output. Pick it from the
-AirPlay list, and audio plays through your desktop's speakers.
+Use your iPhone as a music remote for your Omarchy machine. Pick it from the
+AirPlay list, and audio plays through your desktop.
 
 `shairport-sync` can already do this from a terminal. OmairPlay exists because
 the parts around it are the fiddly bit: it installs what's needed, opens only
