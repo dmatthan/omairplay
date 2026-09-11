@@ -2,14 +2,14 @@
 
 ![OmairPlay](preview.png?v=2)
 
-Turn your Omarchy machine into an AirPlay speaker.
+Turn your Omarchy machine into an AirPlay speaker with your iPhone as the remote.
 
-Play from your iPhone straight to your desktop speakers. Choose your machine
+Tired of Apple Music not allowing remote play? No problem. Skip the broken Linux client: play from your iPhone straight to your system speakers, headphones, etc. Choose your machine
 from the iOS AirPlay list, and the audio comes out of your system.
 
-This plugin is powered by `shairport-sync`, which does this via the terminal. OmairPlay simplifies the setup and implements a seamless experience: it installs what's needed, opens only
+This plugin adds a GUI and convenience features to the terminal tool `shairport-sync`. OmairPlay simplifies the setup and implements a seamless experience: it installs what's needed, opens only
 the firewall ports AirPlay actually uses and only to your local network, puts
-the receiver's state in your bar, and shows what's playing - all using your current
+the receiver's state in your bar, and shows what's playing — all using your current
 Omarchy theme, of course!
 
 ## Requirements
