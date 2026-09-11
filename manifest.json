@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "dmatthan",
   "license": "MIT",
-  "description": "Turns this machine into an AirPlay speaker. The phone is the player and this machine is the output; this is not a remote control.",
+  "description": "Turns this machine into an AirPlay speaker. Play from your phone straight to your desktop speakers, with the track and a level meter in your bar, themed to match.",
   "kinds": [
     "service",
     "bar-widget"
