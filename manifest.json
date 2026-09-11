@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.dmatthan.omairplay",
   "name": "OmairPlay",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "author": "dmatthan",
   "license": "MIT",
-  "description": "Turns this machine into an AirPlay speaker. Play from your phone straight to your desktop speakers, with the track and a level meter in your bar, themed to match.",
+  "description": "Turns this machine into an AirPlay speaker. Play from your phone straight to your desktop speakers, with what's playing shown in your bar.",
   "kinds": [
     "service",
     "bar-widget"
