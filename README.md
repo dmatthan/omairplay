@@ -4,14 +4,13 @@
 
 Turn your Omarchy machine into an AirPlay speaker.
 
-Use your iPhone as a music remote for your Omarchy machine. Pick it from the
-AirPlay list, and audio plays through your desktop.
+Use your iPhone as a music remote for a native lossless music experience. Choose your device from the iOS
+AirPlay list, and the audio plays through your system.
 
-`shairport-sync` can already do this from a terminal. OmairPlay exists because
-the parts around it are the fiddly bit: it installs what's needed, opens only
+This plugin is powered by `shairport-sync`, which does this via the terminal. OmairPlay simplifies the setup and implements a seamless experience: it installs what's needed, opens only
 the firewall ports AirPlay actually uses and only to your local network, puts
-the receiver's state in your bar, and shows what's playing — using your current
-Omarchy theme.
+the receiver's state in your bar, and shows what's playing -- all using your current
+Omarchy theme, of course!
 
 ## Requirements
 
@@ -67,16 +66,9 @@ The bar icon shows the receiver's state:
 - **Right-click** — turn the receiver on or off without opening anything
 - In the popup: `j`/`k` or arrows to move, `Enter` to activate, `Esc` to close
 
-The popup shows what's playing — title, artist, album, cover art, the sending
-device's volume, and a level meter driven by the receiver's real output. A
-notification with the cover art appears when the track changes.
-
-It takes its colours and font from whichever Omarchy theme you're using:
-
-![The popup under three Omarchy themes](themes.png)
-
-Play, pause and skip stay on your phone: an AirPlay 2 receiver is an output,
-not a remote.
+The popup shows what's playing — title, artist, album, cover art and the
+sending device's volume. When the track changes, a notification appears with
+the cover art; turn it off with `trackNotifications` below.
 
 ## Settings
 
@@ -129,11 +121,8 @@ permissions — this one included. What that means here:
 - Removal validates each recorded rule against the exact shape setup writes,
   and rebuilds the command from the matched fields rather than executing a line
   from a file.
-- Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable,
-  so checking it needs no privilege.
-- Your local network is the trust boundary: a device has to be on it to reach
-  the receiver at all. AirPlay 2 itself carries no password mechanism, so keep
-  that in mind on networks you don't control.
+- Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable.
+  No privilege is needed or requested to check it.
 - Nothing is written outside `$HOME`, apart from the packages and the `nqptp`
   system service enabled during setup.
 
