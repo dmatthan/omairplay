@@ -5,3 +5,8 @@
 #
 # It stays on disk as an untracked file, so it survives `omarchy plugin update`.
 NOTES.md
+
+# Byte-cache Python may write next to bin/airplay-install-file if it is ever
+# imported rather than executed. Never wanted in the published plugin.
+__pycache__/
+*.pyc
