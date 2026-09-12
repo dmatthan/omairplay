@@ -12,4 +12,4 @@ __pycache__/
 *.pyc
 
 # Working reference on the marketplace reviewer's standard.
-REVIEW-STANDARD.md
+SECURITY.md
