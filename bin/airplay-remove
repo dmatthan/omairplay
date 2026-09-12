@@ -113,7 +113,7 @@ elif [[ $DO_SYSTEM != yes ]]; then
   echo "To see them:"
   echo "    sudo ufw status | grep $OMAIRPLAY_UFW_COMMENT"
   echo "To remove them, re-run:"
-  echo "    $(readlink -f "${BASH_SOURCE[0]}") --system"
+  echo "    $SELF --system"
 # Read the rule list into a variable instead of piping sudo straight into grep.
 # A pipeline discards sudo's exit code, and a sudo that cannot authenticate
 # prints nothing on stdout -- with its error sent to /dev/null that was
