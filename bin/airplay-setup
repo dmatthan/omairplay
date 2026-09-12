@@ -233,17 +233,11 @@ run install -m 0755 "$PLUGIN_DIR/bin/airplay-wait-audio" "$STATE_DIR/airplay-wai
 run install -m 0644 "$PLUGIN_DIR/bin/airplay-firewall-spec" "$STATE_DIR/airplay-firewall-spec"
 
 run mkdir -p "$UNIT_DIR"
-# systemd does not expand %h inside Documentation=, so substitute the real home
-# when installing. Everything else in the unit uses %h as normal.
-if [[ $DRY_RUN == yes ]]; then
-  run install -m 0644 "$PLUGIN_DIR/share/omarchy-airplay.service" \
-    "$UNIT_DIR/omarchy-airplay.service"
-else
-  sed "s|/home/USER/|$HOME/|g" "$PLUGIN_DIR/share/omarchy-airplay.service" \
-    >"$UNIT_DIR/omarchy-airplay.service"
-  chmod 0644 "$UNIT_DIR/omarchy-airplay.service"
-  echo "Installed $UNIT_DIR/omarchy-airplay.service"
-fi
+# Copied verbatim -- the unit resolves the home directory itself with %h, so
+# there is nothing to interpolate. Nothing in it is built from an inherited
+# value.
+run install -m 0644 "$PLUGIN_DIR/share/omarchy-airplay.service" \
+  "$UNIT_DIR/omarchy-airplay.service"
 run systemctl --user daemon-reload
 echo
 

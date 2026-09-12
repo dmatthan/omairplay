@@ -13,7 +13,13 @@ Documentation=man:shairport-sync(1)
 # Every firewall rule it added is tagged, so you can also see them directly:
 #
 #   sudo ufw status | grep omairplay
-Documentation=file:///home/USER/.local/state/io.github.dmatthan.omairplay/airplay-remove
+#
+# That path is deliberately a comment rather than a Documentation= entry.
+# systemd does not expand %h inside Documentation=, so carrying it as a
+# directive meant setup had to substitute the real home into the unit at
+# install time -- interpolating an inherited value into a file that names an
+# executable. Everything else here uses %h, so the unit now installs
+# byte-for-byte as it ships. `systemctl cat omarchy-airplay` shows this text.
 
 # pipewire-pulse is socket-activated, so order after the socket as well as the
 # service: "the service is active" is a weaker statement than "the socket is
