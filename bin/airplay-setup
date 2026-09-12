@@ -229,8 +229,32 @@ else
 
   (( ${#GLOBAL_V6[@]} )) && echo "Global IPv6 prefixes: ${GLOBAL_V6[*]}"
 
+  mapfile -t WANTED < <(
+    omairplay_rules "$([[ $WIDE == yes ]] && echo yes || echo no)" \
+      ${GLOBAL_V6+"${GLOBAL_V6[@]}"}
+  )
+
+  # Drop anything tagged that this version no longer wants, before adding.
+  #
+  # ufw ignores a duplicate, so re-issuing the wanted set was already
+  # idempotent -- but nothing ever removed a rule the spec had dropped. A
+  # version that changed the rule set left the superseded ones behind for good,
+  # and this plugin is installed and updated through a marketplace, so they
+  # accumulate across upgrades. Found by the same tag removal uses, and deleted
+  # by rule rather than by number, so there is no renumbering to track.
+  mapfile -t STALE < <(omairplay_stale_tagged_rules ${WANTED+"${WANTED[@]}"})
+  if (( ${#STALE[@]} )); then
+    echo "Removing ${#STALE[@]} rule(s) left by an earlier version."
+    for rule in ${STALE+"${STALE[@]}"}; do
+      IFS='|' read -r cidr port proto <<<"$rule"
+      run sudo ufw --force delete allow from "$cidr" to any port "$port" \
+        proto "$proto" || warn "Could not delete the superseded rule for $cidr."
+    done
+  fi
+
   added=0
-  while IFS='|' read -r cidr port proto; do
+  for rule in ${WANTED+"${WANTED[@]}"}; do
+    IFS='|' read -r cidr port proto <<<"$rule"
     [[ -n $cidr ]] || continue
     [[ $cidr == *:* && $SKIP_V6 == yes ]] && continue
     # Tagged with a comment, the way Omarchy's own installers do it, so every
@@ -239,7 +263,7 @@ else
     run sudo ufw allow from "$cidr" to any port "$port" proto "$proto" \
       comment "$OMAIRPLAY_UFW_COMMENT"
     added=$((added + 1))
-  done < <(omairplay_rules "$([[ $WIDE == yes ]] && echo yes || echo no)" ${GLOBAL_V6+"${GLOBAL_V6[@]}"})
+  done
 
   run sudo ufw reload
   echo "$added rule(s) applied, each tagged \"$OMAIRPLAY_UFW_COMMENT\"."

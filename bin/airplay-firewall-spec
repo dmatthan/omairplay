@@ -129,6 +129,56 @@ sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv
   printf '%s\n' ${present+"${present[@]}"} | awk 'NF && !seen[$0]++'
 }
 
+# The tag as ufw stores it. ufw hex-encodes rule comments in
+# /etc/ufw/user.rules, so a plain grep for the tag finds nothing there --
+# "omairplay" is written as 6f6d616972706c6179. `ufw status` decodes it again,
+# which is why the tag is greppable there and not here.
+omairplay_tag_hex() {
+  printf '%s' "$OMAIRPLAY_UFW_COMMENT" | od -An -tx1 | tr -d ' \n'
+}
+
+# The tagged rules currently installed, as "<cidr>|<ports>|<proto>" -- the same
+# shape omairplay_rules emits. Read from the rule files, which are
+# world-readable, so this needs no privilege.
+omairplay_installed_tagged_rules() {
+  local hex f line
+  local -a w
+  hex="$(omairplay_tag_hex)"
+  for f in /etc/ufw/user.rules /etc/ufw/user6.rules; do
+    [[ -r $f ]] || continue
+    while IFS= read -r line; do
+      [[ $line == "### tuple ### "*"comment=$hex" ]] || continue
+      # ### tuple ### allow <proto> <dport> <daddr> any <saddr> in comment=<hex>
+      #  1     2    3    4      5       6       7    8     9     10      11
+      read -r -a w <<<"$line"
+      printf '%s|%s|%s\n' "${w[8]}" "${w[5]}" "${w[4]}"
+    done < "$f"
+  done
+}
+
+# Tagged rules that are installed but the current spec no longer wants.
+#
+# Setup re-issues every wanted rule on each run and ufw ignores duplicates, so
+# adding is already idempotent -- but removing was not. A version that changes
+# the rule set would leave the superseded rules behind for ever, and since this
+# plugin is installed and updated through a marketplace, that accumulates.
+# Emitted in the same shape, so the caller can hand them straight to
+# `ufw delete allow from ...`.
+#
+# $@  the wanted rules, as produced by omairplay_rules.
+omairplay_stale_tagged_rules() {
+  local installed
+  local -a wanted=("$@")
+  while IFS= read -r installed; do
+    [[ -n $installed ]] || continue
+    local found=no w
+    for w in ${wanted+"${wanted[@]}"}; do
+      [[ $w == "$installed" ]] && { found=yes; break; }
+    done
+    [[ $found == no ]] && printf '%s\n' "$installed"
+  done < <(omairplay_installed_tagged_rules)
+}
+
 # Which of the static IPv6 ranges this machine actually holds an address in.
 # fe80::/10 is present on every interface and is unroutable by definition, so it
 # needs no check. fc00::/7 is only worth opening when a unique-local address is
