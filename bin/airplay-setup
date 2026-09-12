@@ -214,13 +214,17 @@ bold "4. Firewall"
 if ! command -v ufw >/dev/null 2>&1; then
   warn "ufw is not installed, so no firewall rules were added."
   warn "If you use another firewall, AirPlay 2 needs TCP 7000, UDP 319, 320"
-  warn "and 5353, plus the kernel ephemeral range, reachable from your LAN."
+  warn "and 5353, plus the kernel ephemeral range, reachable from your LAN --"
+  warn "over IPv6 as well as IPv4, because iOS will use IPv6 when the router"
+  warn "offers it."
 else
   mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
   if [[ -r /etc/default/ufw ]] && ! grep -qE '^IPV6=yes' /etc/default/ufw; then
-    warn "ufw has IPv6 disabled, so IPv6 rules are skipped. AirPlay 2 clock"
-    warn "sync may fall back to IPv4; if playback will not start, enable IPv6"
-    warn "in /etc/default/ufw and run setup again."
+    warn "ufw has IPv6 disabled, so IPv6 rules are skipped. That is more than"
+    warn "a clock-sync problem: when the router offers IPv6, iOS runs the whole"
+    warn "session over it, and the symptom is a receiver that connects and shows"
+    warn "the track while playing nothing. If that happens, enable IPv6 in"
+    warn "/etc/default/ufw and run setup again."
     GLOBAL_V6=()
     SKIP_V6=yes
   else

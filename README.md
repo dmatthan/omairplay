@@ -106,6 +106,9 @@ speaker can appear on your phone while the connection is still blocked.
 OmairPlay reads the live `ufw` rules and says so in the popup, with a button to
 re-run setup.
 
+If it connects and shows the track but plays nothing, that is the same problem
+on the audio channels rather than the control one — again, re-run setup.
+
 The same applies after your router hands out a new IPv6 prefix. Re-running
 setup picks up your current addresses.
 
