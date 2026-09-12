@@ -66,6 +66,12 @@ rule_present() {
 
 mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
 [[ $UFW_IPV6 == true ]] || GLOBAL_V6=()
+# Bound the list. A machine with a pathological number of global IPv6 prefixes
+# would otherwise make this program's output -- and the rule set derived from
+# it below -- grow without limit. Eight is far more than a home router hands
+# out, and it keeps the JSON bounded by construction, which is what lets the
+# caller read it without a byte cap.
+GLOBAL_V6=( ${GLOBAL_V6+"${GLOBAL_V6[@]:0:8}"} )
 
 MISSING=()
 while IFS='|' read -r cidr port proto; do

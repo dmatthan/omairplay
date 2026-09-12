@@ -58,6 +58,12 @@ if [[ -r $CONFIG ]]; then
   # Undo the libconfig escaping airplay-write-config applies.
   NAME="${NAME//\\\"/\"}"
   NAME="${NAME//\\\\/\\}"
+  # Cap it. shairport-sync itself advertises at most 50 characters, and the
+  # popup shows fewer, but this is read out of a file the user can edit by
+  # hand -- so the field is bounded here rather than left to whatever is in
+  # the config. Keeps this program's output bounded by construction: fixed
+  # keys, one short variable string, no unbounded field anywhere.
+  NAME="${NAME:0:64}"
 fi
 
 # The config is only read at startup, so a config written *after* the receiver

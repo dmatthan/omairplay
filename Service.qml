@@ -41,6 +41,26 @@ Item {
   readonly property string binNotifySend: "/usr/bin/notify-send"
   readonly property string binTerminal:
     "/usr/bin/omarchy-launch-floating-terminal-with-presentation"
+  readonly property string binTimeout: "/usr/bin/timeout"
+
+  // Every child process gets a hard deadline, so a wedged helper cannot leave
+  // this plugin busy forever inside the long-running shell process. timeout(1)
+  // sends SIGTERM at the deadline and exits 124, which the handlers below
+  // report as a timeout rather than a command failure.
+  //
+  // The probes are read-only and measured at 40ms and 130ms; ten seconds is
+  // three orders of magnitude of headroom and only fires if something is
+  // genuinely stuck.
+  readonly property string probeDeadlineSec: "10"
+
+  // Actions need a much larger budget, because a legitimate one can block for
+  // a long time and cutting it short would report a false failure. Starting
+  // the receiver waits on the unit's ExecStartPre audio gate (up to 45s), and
+  // systemd's own DefaultTimeoutStartSec is 90s, with TimeoutStopSec=10 on
+  // stop -- so a restart can legitimately take about 100 seconds. 150 is
+  // beyond anything systemd will allow to continue, so it bounds the wait
+  // without ever pre-empting a real one.
+  readonly property string actionDeadlineSec: "150"
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -370,8 +390,7 @@ Item {
     lastError = ""
     pendingAction = name
     _queuedSteps = steps.slice(1)
-    actionProcess.command = steps[0]
-    actionProcess.running = true
+    _spawnStep(steps[0])
   }
 
   // Steps of the current action still to run.
@@ -381,19 +400,30 @@ Item {
     if (_queuedSteps.length === 0) return
     var next = _queuedSteps[0]
     _queuedSteps = _queuedSteps.slice(1)
-    actionProcess.command = next
+    _spawnStep(next)
+  }
+
+  // Single place every action step is spawned, so the deadline cannot be
+  // forgotten on a future one.
+  function _spawnStep(argv) {
+    actionProcess.command = [binTimeout, actionDeadlineSec].concat(argv)
     actionProcess.running = true
   }
 
   // ------------------------------------------------------------- processes
   Process {
     id: statusProcess
-    command: [root.pluginDir + "/bin/airplay-status"]
+    command: [root.binTimeout, root.probeDeadlineSec,
+              root.pluginDir + "/bin/airplay-status"]
     running: false
     stdout: StdioCollector { id: statusOut; waitForEnd: true }
     stderr: StdioCollector { id: statusErr; waitForEnd: true }
     onExited: function(exitCode) {
       root.probed = true
+      if (exitCode === 124) {
+        root.lastError = "Timed out reading receiver status"
+        return
+      }
       if (exitCode !== 0) {
         root.lastError = String(statusErr.text || "").trim() || "Could not read receiver status"
         return
@@ -417,7 +447,8 @@ Item {
 
   Process {
     id: firewallProcess
-    command: [root.pluginDir + "/bin/airplay-check-firewall"]
+    command: [root.binTimeout, root.probeDeadlineSec,
+              root.pluginDir + "/bin/airplay-check-firewall"]
     running: false
     stdout: StdioCollector { id: firewallOut; waitForEnd: true }
     onExited: function(exitCode) {
@@ -453,7 +484,10 @@ Item {
       root._queuedSteps = []
       if (exitCode !== 0) {
         var err = String(actionErr.text || "").trim()
-        root.lastError = err !== "" ? err : ("Could not " + action + " the receiver")
+        if (exitCode === 124)
+          root.lastError = "Timed out trying to " + action + " the receiver"
+        else
+          root.lastError = err !== "" ? err : ("Could not " + action + " the receiver")
         // Do not keep claiming a state the action failed to reach.
         root.desiredRunning = -1
       }
