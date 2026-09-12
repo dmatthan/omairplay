@@ -61,6 +61,13 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shairport-sync"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/io.github.dmatthan.omairplay"
 
+# Anything the removal cannot finish is recorded here rather than warned about
+# and forgotten. It decides whether the state directory -- which holds this
+# uninstaller and the rule spec it needs -- may be deleted at the end, and it is
+# repeated in the closing summary.
+UNFINISHED=()
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
 run() {
@@ -107,9 +114,21 @@ elif [[ $DO_SYSTEM != yes ]]; then
   echo "    sudo ufw status | grep $OMAIRPLAY_UFW_COMMENT"
   echo "To remove them, re-run:"
   echo "    $(readlink -f "${BASH_SOURCE[0]}") --system"
+# Read the rule list into a variable instead of piping sudo straight into grep.
+# A pipeline discards sudo's exit code, and a sudo that cannot authenticate
+# prints nothing on stdout -- with its error sent to /dev/null that was
+# indistinguishable from a firewall holding no matching rules. Removal then
+# deleted itself and reported that nothing was left behind, while every rule
+# was still installed.
+elif ! ufw_status="$(sudo ufw status numbered 2>&1)"; then
+  UNFINISHED+=( "firewall rules tagged \"$OMAIRPLAY_UFW_COMMENT\"" )
+  warn "Could not read the firewall rules, so none were removed."
+  [[ -n $ufw_status ]] && warn "    $ufw_status"
+  warn "To see them:    sudo ufw status | grep $OMAIRPLAY_UFW_COMMENT"
+  warn "To remove them: $SELF --system"
 else
   mapfile -t numbers < <(
-    sudo ufw status numbered 2>/dev/null \
+    printf '%s\n' "$ufw_status" \
       | grep -F "# $OMAIRPLAY_UFW_COMMENT" \
       | grep -oE '^\[[ 0-9]+\]' | tr -d '[] ' | sort -rn
   )
@@ -118,9 +137,28 @@ else
   else
     echo "Removing ${#numbers[@]} rule(s) tagged \"$OMAIRPLAY_UFW_COMMENT\"."
     for n in "${numbers[@]}"; do
-      run sudo ufw --force delete "$n" || warn "Rule $n was already gone."
+      run sudo ufw --force delete "$n" \
+        || warn "ufw did not delete rule $n; it may already be gone."
     done
-    run sudo ufw reload
+    run sudo ufw reload || warn "ufw reload failed."
+
+    # Confirm rather than assume. Deleting by number is position-sensitive, and
+    # a failed delete above only warned.
+    if [[ $DRY_RUN != yes ]]; then
+      if ! ufw_after="$(sudo ufw status numbered 2>&1)"; then
+        UNFINISHED+=( "firewall rules tagged \"$OMAIRPLAY_UFW_COMMENT\" (could not verify)" )
+        warn "Could not re-read the firewall to confirm the rules are gone."
+      else
+        left="$(printf '%s\n' "$ufw_after" | grep -cF "# $OMAIRPLAY_UFW_COMMENT")" || true
+        if (( ${left:-0} > 0 )); then
+          UNFINISHED+=( "$left firewall rule(s) tagged \"$OMAIRPLAY_UFW_COMMENT\"" )
+          warn "$left rule(s) tagged \"$OMAIRPLAY_UFW_COMMENT\" are still present."
+          warn "To remove them, re-run: $SELF --system"
+        else
+          echo "Confirmed: no rules tagged \"$OMAIRPLAY_UFW_COMMENT\" remain."
+        fi
+      fi
+    fi
   fi
 fi
 echo
@@ -147,8 +185,17 @@ elif [[ $DO_SYSTEM != yes ]]; then
   echo "    sudo systemctl disable --now nqptp.service"
 else
   echo "Setup enabled nqptp.service, so turning it back off."
-  run sudo systemctl disable --now nqptp.service
-  run rm -f "$NQPTP_NOTE"
+  # The note is what records that setup enabled this service. Removing it after
+  # a failed disable would lose that ownership, and a later run would leave the
+  # service enabled on the grounds that it was never ours.
+  if run sudo systemctl disable --now nqptp.service; then
+    run rm -f "$NQPTP_NOTE"
+  else
+    UNFINISHED+=( "nqptp.service, still enabled" )
+    warn "Could not disable nqptp.service; the note recording that setup"
+    warn "enabled it has been kept. To finish:"
+    warn "    sudo systemctl disable --now nqptp.service"
+  fi
 fi
 echo
 
@@ -161,7 +208,18 @@ bold "5. Clean up"
 # The one exception is an unprivileged run, where the firewall rules and the
 # nqptp service are still pending -- the uninstaller and its ownership note are
 # what finish that job, so they stay until they are no longer needed.
-if [[ $DO_SYSTEM == yes ]]; then
+if [[ $DO_SYSTEM == yes ]] && (( ${#UNFINISHED[@]} )); then
+  # Deleting the state directory here would take this uninstaller and the rule
+  # list with it, leaving the unfinished work with no tool to finish it.
+  echo "Keeping $STATE_DIR: the removal did not finish."
+  for item in "${UNFINISHED[@]}"; do
+    echo "  - $item"
+  done
+  echo
+  echo "It holds this uninstaller and the rule list it needs. Once the problem"
+  echo "is sorted, re-run:"
+  echo "    $SELF --system"
+elif [[ $DO_SYSTEM == yes ]]; then
   if [[ $DRY_RUN == yes ]]; then
     printf '\033[36m$ %s\033[0m\n' "rm -rf $STATE_DIR"
     echo "Nothing would be left behind."
@@ -175,7 +233,13 @@ else
 fi
 echo
 
-bold "Done."
+if (( ${#UNFINISHED[@]} == 1 )); then
+  bold "Done, apart from the one thing listed above."
+elif (( ${#UNFINISHED[@]} )); then
+  bold "Done, apart from the ${#UNFINISHED[@]} things listed above."
+else
+  bold "Done."
+fi
 cat <<EOM
 
 The shairport-sync and nqptp packages are still installed. They sit inert, and
@@ -183,3 +247,11 @@ may be wanted by something else, so removing them is a separate decision:
 
     sudo pacman -Rs shairport-sync nqptp
 EOM
+
+# A removal that could not finish is not a success. Nothing consumes this today
+# -- the popup launches it detached, and Omarchy's terminal wrapper only treats
+# 130 specially -- but reporting 0 here would repeat, for any caller, exactly
+# the mistake this script was just fixed for.
+if (( ${#UNFINISHED[@]} )); then
+  exit 1
+fi
