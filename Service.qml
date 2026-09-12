@@ -322,11 +322,16 @@ Item {
     if (busy) return
     var wanted = String(name || "").trim().substring(0, 50)
     if (wanted === "") return
-    var script = "set -e; " + Util.shellQuote(pluginDir + "/bin/airplay-write-config")
-      + " --name " + Util.shellQuote(wanted)
+    // Two argv arrays rather than one shell string. This used to hand
+    // "set -e; write-config --name <name>; systemctl restart <unit>" to
+    // bash -c, which meant building a command line around a name the user
+    // typed and relying on the quoting to hold. runSteps chains the two
+    // commands instead, stopping if the first fails -- same effect as set -e,
+    // with no shell involved and nothing to quote.
+    var steps = [[pluginDir + "/bin/airplay-write-config", "--name", wanted]]
     if (restartIfRunning && running)
-      script += "; " + binSystemctl + " --user restart " + Util.shellQuote(unit)
-    runAction("name", ["/usr/bin/bash", "-c", script])
+      steps.push([binSystemctl, "--user", "restart", unit])
+    runSteps("name", steps)
   }
 
   // Privileged setup runs visibly in Omarchy's floating terminal, which is
@@ -352,10 +357,31 @@ Item {
     catchUpTimer.restart()
   }
 
+  // A single command. Most actions are one step.
   function runAction(name, command) {
+    runSteps(name, [command])
+  }
+
+  // Several commands in order, stopping at the first failure. `pendingAction`
+  // stays set for the whole chain, so `busy` and `actionLabel` describe the
+  // operation rather than whichever step happens to be in flight.
+  function runSteps(name, steps) {
+    if (!steps || steps.length === 0) return
     lastError = ""
     pendingAction = name
-    actionProcess.command = command
+    _queuedSteps = steps.slice(1)
+    actionProcess.command = steps[0]
+    actionProcess.running = true
+  }
+
+  // Steps of the current action still to run.
+  property var _queuedSteps: []
+
+  function _runNextStep() {
+    if (_queuedSteps.length === 0) return
+    var next = _queuedSteps[0]
+    _queuedSteps = _queuedSteps.slice(1)
+    actionProcess.command = next
     actionProcess.running = true
   }
 
@@ -413,16 +439,26 @@ Item {
     running: false
     stderr: StdioCollector { id: actionErr; waitForEnd: true }
     onExited: function(exitCode) {
-      var failedAction = root.pendingAction
+      var action = root.pendingAction
+
+      if (exitCode === 0 && root._queuedSteps.length > 0) {
+        // More to do, and the last step succeeded. Start the next one outside
+        // this handler rather than restarting the process from inside its own
+        // exit signal.
+        Qt.callLater(root._runNextStep)
+        return
+      }
+
       root.pendingAction = ""
+      root._queuedSteps = []
       if (exitCode !== 0) {
         var err = String(actionErr.text || "").trim()
-        root.lastError = err !== "" ? err : ("Could not " + failedAction + " the receiver")
+        root.lastError = err !== "" ? err : ("Could not " + action + " the receiver")
         // Do not keep claiming a state the action failed to reach.
         root.desiredRunning = -1
       }
       root.refresh()
-      if (failedAction === "name") root.refreshFirewall()
+      if (action === "name") root.refreshFirewall()
     }
   }
 
