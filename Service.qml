@@ -43,6 +43,40 @@ Item {
     "/usr/bin/omarchy-launch-floating-terminal-with-presentation"
   readonly property string binTimeout: "/usr/bin/timeout"
 
+  // The environment handed to every child spawned from here.
+  //
+  // The scripts re-exec themselves into a closed environment, but that leaves
+  // two gaps this closes: timeout(1) itself, and systemctl and notify-send,
+  // which are binaries with nothing to re-exec into. All three would otherwise
+  // start with the shell's inherited environment, where LD_PRELOAD alone is
+  // enough to run code inside them.
+  //
+  // Only what they actually need: systemctl --user and notify-send reach the
+  // session bus, and pactl (via the scripts) needs the runtime directory.
+  // HOME is read from the environment here rather than the passwd database
+  // because Quickshell offers no lookup; the scripts correct it themselves on
+  // re-exec, which is what decides where files are written.
+  readonly property var sealedEnv: {
+    var e = {
+      "PATH": "/usr/bin",
+      "OMARCHY_PATH": "/usr/share/omarchy",
+      "LC_ALL": "C",
+      "HOME": home
+    }
+    var runtime = Quickshell.env("XDG_RUNTIME_DIR")
+    if (runtime) e["XDG_RUNTIME_DIR"] = runtime
+    var bus = Quickshell.env("DBUS_SESSION_BUS_ADDRESS")
+    if (bus) e["DBUS_SESSION_BUS_ADDRESS"] = bus
+    return e
+  }
+
+  // A deadline timeout(1) will actually enforce. Without --kill-after it sends
+  // SIGTERM and then waits indefinitely, so a child that ignores the signal
+  // outlives its own deadline -- measured at 30s against a 3s limit. The grace
+  // period then escalates to SIGKILL. Omarchy's own scripts use the same form.
+  readonly property string probeKillAfter: "--kill-after=5s"
+  readonly property string actionKillAfter: "--kill-after=10s"
+
   // Every child process gets a hard deadline, so a wedged helper cannot leave
   // this plugin busy forever inside the long-running shell process. timeout(1)
   // sends SIGTERM at the deadline and exits 124, which the handlers below
@@ -277,7 +311,11 @@ Item {
     if (album !== "" && album !== title) sub.push(album)
     args.push(sub.join("  \u00b7  "))
 
-    Quickshell.execDetached(args)
+    Quickshell.execDetached({
+      command: args,
+      clearEnvironment: true,
+      environment: sealedEnv
+    })
   }
 
   Component.onCompleted: _serviceLoadedAt = Date.now()
@@ -368,6 +406,11 @@ Item {
     launchInTerminal(Util.shellQuote(pluginDir + "/bin/airplay-remove") + " --system")
   }
 
+  // Deliberately not given the sealed environment, unlike everything else here.
+  // This launches a graphical terminal, which needs the session's Wayland,
+  // portal and theme variables to appear at all. The script it runs re-execs
+  // itself into a closed environment as its first action, so the privileged
+  // work is sealed regardless of what this launcher inherits.
   function launchInTerminal(command) {
     Quickshell.execDetached([
       binTerminal, command
@@ -406,16 +449,19 @@ Item {
   // Single place every action step is spawned, so the deadline cannot be
   // forgotten on a future one.
   function _spawnStep(argv) {
-    actionProcess.command = [binTimeout, actionDeadlineSec].concat(argv)
+    actionProcess.command =
+      [binTimeout, actionKillAfter, actionDeadlineSec].concat(argv)
     actionProcess.running = true
   }
 
   // ------------------------------------------------------------- processes
   Process {
     id: statusProcess
-    command: [root.binTimeout, root.probeDeadlineSec,
+    command: [root.binTimeout, root.probeKillAfter, root.probeDeadlineSec,
               root.pluginDir + "/bin/airplay-status"]
     running: false
+    clearEnvironment: true
+    environment: root.sealedEnv
     stdout: StdioCollector { id: statusOut; waitForEnd: true }
     stderr: StdioCollector { id: statusErr; waitForEnd: true }
     onExited: function(exitCode) {
@@ -447,9 +493,11 @@ Item {
 
   Process {
     id: firewallProcess
-    command: [root.binTimeout, root.probeDeadlineSec,
+    command: [root.binTimeout, root.probeKillAfter, root.probeDeadlineSec,
               root.pluginDir + "/bin/airplay-check-firewall"]
     running: false
+    clearEnvironment: true
+    environment: root.sealedEnv
     stdout: StdioCollector { id: firewallOut; waitForEnd: true }
     onExited: function(exitCode) {
       if (exitCode !== 0) return
@@ -468,6 +516,8 @@ Item {
     id: actionProcess
     command: []
     running: false
+    clearEnvironment: true
+    environment: root.sealedEnv
     stderr: StdioCollector { id: actionErr; waitForEnd: true }
     onExited: function(exitCode) {
       var action = root.pendingAction

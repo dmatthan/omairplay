@@ -98,6 +98,22 @@ escape_libconfig() {
 
 # The AirPlay name shows up in the iPhone's speaker list. Shairport Sync caps
 # the advertised name at 50 characters.
+# Strip control characters before anything else touches the name.
+#
+# escape_libconfig escapes backslashes and quotes, which is enough for the
+# characters libconfig cares about inside a string -- but not for a newline.
+# A name containing one ends the line early and whatever follows lands in the
+# config as directives:
+#
+#     name = "Evil\";
+#     port = 9999;          <- injected, inside the general block
+#
+# libconfig has sections that run commands (sessioncontrol's run_this_* hooks),
+# so arbitrary directives are worth more than a cosmetic bug. The popup caps
+# the name at 50 characters and trims it, but this file is also driven from the
+# persisted plugin settings and from the command line, so the guarantee belongs
+# here rather than in the caller.
+NAME="${NAME//[[:cntrl:]]/}"
 NAME="${NAME:0:50}"
 [[ -n ${NAME//[[:space:]]/} ]] || NAME="Omarchy Speaker"
 
