@@ -132,7 +132,10 @@ bold "4. The nqptp system service"
 # ours. That is why there is no prompt here: ownership is recorded, so there is
 # nothing for the user to be asked.
 NQPTP_NOTE="$STATE_DIR/enabled-nqptp"
-if [[ ! -f $NQPTP_NOTE ]]; then
+# -f alone follows symlinks, so a link planted at this path would make removal
+# disable a service setup never enabled. Require a real file; anything else
+# falls through to leaving nqptp alone, which is the safe direction.
+if [[ ! -f $NQPTP_NOTE || -L $NQPTP_NOTE ]]; then
   echo "nqptp.service was not enabled by this plugin; leaving it alone."
 elif [[ "$(systemctl is-enabled nqptp.service 2>/dev/null)" != "enabled" ]] \
      && ! systemctl is-active nqptp.service &>/dev/null; then

@@ -56,6 +56,9 @@ PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$PLUGIN_DIR/bin/airplay-firewall-spec"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/io.github.dmatthan.omairplay"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+# Files that are later executed -- or that tell systemd what to execute --
+# are placed with this rather than install(1). See the script for why.
+INSTALL_FILE="$PLUGIN_DIR/bin/airplay-install-file"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 warn()  { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -143,11 +146,23 @@ if [[ "$(systemctl is-enabled nqptp.service 2>/dev/null)" == "enabled" ]]; then
 else
   run sudo systemctl enable nqptp.service
   run mkdir -p "$STATE_DIR"
-  if [[ $DRY_RUN != yes ]]; then
-    printf '%s\n' \
-      "# OmairPlay enabled nqptp.service on $(date -Is)." \
-      "# It was not enabled before. airplay-remove disables it again." \
-      >"$STATE_DIR/enabled-nqptp"
+  # Through the installer rather than a > redirect, which would follow a
+  # symlink left at this path and write the note through it.
+  #
+  # Not piped into `run`: under `set -e -o pipefail`, run returns early in
+  # --dry-run without reading stdin, printf dies of SIGPIPE, and the whole
+  # pipeline fails at 141 -- which aborted setup. So the two modes are spelt
+  # out instead.
+  NOTE_LINES=(
+    "# OmairPlay enabled nqptp.service on $(date -Is)."
+    "# It was not enabled before. airplay-remove disables it again."
+  )
+  if [[ $DRY_RUN == yes ]]; then
+    printf '\033[36m$ %s\033[0m\n' \
+      "$INSTALL_FILE <note> $STATE_DIR/enabled-nqptp 0644"
+  else
+    printf '%s\n' "${NOTE_LINES[@]}" \
+      | "$INSTALL_FILE" /dev/stdin "$STATE_DIR/enabled-nqptp" 0644
   fi
 fi
 if systemctl is-active nqptp.service &>/dev/null; then
@@ -243,20 +258,20 @@ fi
 # airplay-remove derives every path from $HOME and references nothing inside
 # the plugin folder, so a copy next to the firewall record works standalone.
 run mkdir -p "$STATE_DIR"
-run install -m 0755 "$PLUGIN_DIR/bin/airplay-remove" "$STATE_DIR/airplay-remove"
+run "$INSTALL_FILE" "$PLUGIN_DIR/bin/airplay-remove" "$STATE_DIR/airplay-remove" 0755
 # The unit's audio gate lives here too, so the receiver keeps working even if
 # the plugin is removed. See the comment in share/omarchy-airplay.service.
-run install -m 0755 "$PLUGIN_DIR/bin/airplay-wait-audio" "$STATE_DIR/airplay-wait-audio"
+run "$INSTALL_FILE" "$PLUGIN_DIR/bin/airplay-wait-audio" "$STATE_DIR/airplay-wait-audio" 0755
 # airplay-remove sources the rule spec from its own directory, so the copy has
 # to travel with it.
-run install -m 0644 "$PLUGIN_DIR/bin/airplay-firewall-spec" "$STATE_DIR/airplay-firewall-spec"
+run "$INSTALL_FILE" "$PLUGIN_DIR/bin/airplay-firewall-spec" "$STATE_DIR/airplay-firewall-spec" 0644
 
 run mkdir -p "$UNIT_DIR"
 # Copied verbatim -- the unit resolves the home directory itself with %h, so
 # there is nothing to interpolate. Nothing in it is built from an inherited
 # value.
-run install -m 0644 "$PLUGIN_DIR/share/omarchy-airplay.service" \
-  "$UNIT_DIR/omarchy-airplay.service"
+run "$INSTALL_FILE" "$PLUGIN_DIR/share/omarchy-airplay.service" \
+  "$UNIT_DIR/omarchy-airplay.service" 0644
 run systemctl --user daemon-reload
 echo
 

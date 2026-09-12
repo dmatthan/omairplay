@@ -1,0 +1,120 @@
+#!/usr/bin/python3
+"""Install one file into a directory without following symlinks.
+
+    airplay-install-file SRC DEST MODE
+
+airplay-setup uses this for the three files it places in the state directory
+and for the systemd user unit. All four are later executed or read by something
+else: airplay-wait-audio runs as the receiver unit's ExecStartPre,
+airplay-remove is run with sudo, and the unit tells systemd what to launch.
+
+The gap this closes is the destination *directory*. `mkdir -p` accepts a
+symlink where it expected a directory and exits 0, after which install(1)
+writes into whatever that link points at -- so setup can be made to place an
+executable somewhere it never named, and the file it meant to install is not
+where it will later look for it. This opens the directory O_NOFOLLOW and stops
+with a message instead. (install(1) is sound about the final component: it
+unlinks an existing symlink rather than writing through it. A non-regular file
+at the destination is still refused here, because it means something
+unexpected is there.)
+
+The content goes to a temporary file in the destination directory -- never
+/tmp, which has no business in installing something that will be executed --
+and is moved into place with os.replace, which is atomic. install(1) unlinks
+and then copies, so a reader can catch a half-written executable; the unit's
+ExecStartPre reads one of these on every start.
+
+This is not a defence against an attacker who already has this user's
+privileges: these paths are under $HOME and written as the user, so anyone able
+to write them could rewrite them afterwards. The narrower guarantee is the
+useful one -- setup writes a regular file to exactly the path it names,
+completely, or fails loudly.
+"""
+
+import os
+import stat
+import sys
+
+
+def fail(message):
+    print(f"airplay-install-file: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main(argv):
+    if len(argv) != 3:
+        fail("usage: airplay-install-file SRC DEST MODE")
+    src, dest, mode_text = argv
+
+    try:
+        mode = int(mode_text, 8)
+    except ValueError:
+        fail(f"mode must be octal, got {mode_text!r}")
+
+    dest_dir = os.path.dirname(dest) or "."
+    name = os.path.basename(dest)
+    if not name or name in (".", ".."):
+        fail(f"destination is not a file path: {dest!r}")
+
+    try:
+        with open(src, "rb") as fh:
+            content = fh.read()
+    except OSError as exc:
+        fail(f"cannot read {src}: {exc.strerror}")
+
+    # O_NOFOLLOW covers the final component, so this refuses a state directory
+    # that is itself a symlink. Its parents are ordinary XDG directories.
+    try:
+        dir_fd = os.open(dest_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        fail(f"cannot open directory {dest_dir}: {exc.strerror}")
+
+    tmp = f".{name}.tmp.{os.getpid()}"
+    try:
+        try:
+            # Anything already at the destination must be a plain file, or
+            # replacing it is not the operation we think it is.
+            existing = os.lstat(name, dir_fd=dir_fd)
+            if not stat.S_ISREG(existing.st_mode):
+                fail(f"{dest} exists and is not a regular file; refusing to replace it")
+        except FileNotFoundError:
+            pass
+
+        try:
+            # O_EXCL: a file or symlink sitting at the temporary name is an
+            # error, not something to write through.
+            fd = os.open(
+                tmp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                mode,
+                dir_fd=dir_fd,
+            )
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
+            # Explicitly, because open()'s mode is masked by the umask and
+            # these modes matter.
+            os.chmod(tmp, mode, dir_fd=dir_fd, follow_symlinks=False)
+            os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except OSError as exc:
+            _discard(tmp, dir_fd)
+            fail(f"cannot install {dest}: {exc.strerror}")
+        except SystemExit:
+            _discard(tmp, dir_fd)
+            raise
+    finally:
+        os.close(dir_fd)
+
+    print(f"Installed {dest}")
+
+
+def _discard(tmp, dir_fd):
+    try:
+        os.unlink(tmp, dir_fd=dir_fd)
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
