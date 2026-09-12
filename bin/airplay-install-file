@@ -33,6 +33,7 @@ completely, or fails loudly.
 
 import os
 import pwd
+import secrets
 import stat
 import sys
 
@@ -40,6 +41,43 @@ import sys
 def fail(message):
     print(f"airplay-install-file: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+# Anything this installs is small: the largest is the uninstaller at a few
+# thousand lines. A cap keeps a substituted file from being read into memory
+# without limit.
+MAX_SOURCE_BYTES = 1 << 20
+
+
+def read_regular_file(path):
+    """Read a file through a descriptor, refusing anything that is not one.
+
+    open() on a path is three assumptions: that it is not a symlink, that it is
+    a regular file, and that reading it will return. A FIFO left at the path
+    breaks the third -- the open blocks until someone writes, which stalls
+    whatever was reading. O_NONBLOCK makes that open return instead, and fstat
+    on the descriptor answers the other two about the thing actually opened
+    rather than about whatever the name pointed at a moment ago.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        fail(f"cannot read {path}: {exc.strerror}")
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            fail(f"{path} is not a regular file; refusing to read it")
+        if st.st_size > MAX_SOURCE_BYTES:
+            fail(f"{path} is larger than {MAX_SOURCE_BYTES} bytes; refusing to read it")
+        # Clear O_NONBLOCK now the type is known: it means nothing for a regular
+        # file, and leaving it set would be misleading.
+        os.set_blocking(fd, True)
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            return fh.read(MAX_SOURCE_BYTES + 1)[:MAX_SOURCE_BYTES]
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def real_home():
@@ -110,18 +148,16 @@ def main(argv):
     if not name or name in (".", ".."):
         fail(f"destination is not a file path: {dest!r}")
 
-    try:
-        with open(src, "rb") as fh:
-            content = fh.read()
-    except OSError as exc:
-        fail(f"cannot read {src}: {exc.strerror}")
+    content = read_regular_file(src)
 
     try:
         dir_fd = open_dir_under_home(dest_dir)
     except OSError as exc:
         fail(f"cannot open directory {dest_dir}: {exc.strerror}")
 
-    tmp = f".{name}.tmp.{os.getpid()}"
+    # Random, not derived from the pid: a predictable name is one an attacker
+    # can create first, and O_EXCL would then fail every run rather than once.
+    tmp = f".{name}.tmp.{secrets.token_hex(8)}"
     try:
         try:
             # Anything already at the destination must be a plain file, or
@@ -135,10 +171,14 @@ def main(argv):
         try:
             # O_EXCL: a file or symlink sitting at the temporary name is an
             # error, not something to write through.
+            # Created 0600, not at the final mode. Between create and rename
+            # the file is incomplete, and for the executables this installs
+            # that would mean a partially written file briefly carrying the
+            # execute bit. The mode is set below, once the content is on disk.
             fd = os.open(
                 tmp,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                mode,
+                0o600,
                 dir_fd=dir_fd,
             )
             with os.fdopen(fd, "wb") as fh:

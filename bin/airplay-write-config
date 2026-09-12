@@ -185,7 +185,9 @@ fi
 # human-readable header underneath it. Guarding on the prose was the first
 # attempt and it immediately rejected our own config, because the wording had
 # been changed since that file was written. The marker never changes.
-if [[ -f $CONFIG_FILE && $FORCE != yes ]] \
+# -L as well as -f: a symlink to a regular file passes -f, and the clobber
+# guard would then be reading somewhere other than where the write lands.
+if [[ -f $CONFIG_FILE && ! -L $CONFIG_FILE && $FORCE != yes ]] \
    && ! grep -q '^// omairplay:generated' "$CONFIG_FILE"; then
   cat >&2 <<MSG
 airplay-write-config: refusing to overwrite $CONFIG_FILE
@@ -208,7 +210,7 @@ chmod 0644 "$TMP"
 # "was this file written after the receiver started?" is how the plugin decides
 # whether a restart is owed -- and rewriting a byte-identical file would make
 # it claim a restart is needed when nothing changed at all.
-if [[ -f $CONFIG_FILE ]] \
+if [[ -f $CONFIG_FILE && ! -L $CONFIG_FILE ]] \
    && diff -q <(grep -v '^// Written:' "$CONFIG_FILE") \
               <(grep -v '^// Written:' "$TMP") >/dev/null 2>&1; then
   rm -f "$TMP"

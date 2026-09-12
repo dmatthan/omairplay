@@ -85,9 +85,16 @@ systemctl --user is-enabled shairport-sync.service &>/dev/null && PKG=true
 # config rather than from the plugin's settings -- so the popup can tell the
 # difference between "you typed a new name" and "the receiver has that name".
 NAME=""
-if [[ -r $CONFIG ]]; then
-  NAME="$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
-    "$CONFIG" | head -1)"
+# -f and not -L, not -r. A FIFO is readable, and sed on one blocks until
+# something writes to it -- which turns this probe into a process that never
+# returns. The read is also capped: this only needs the first name line, and a
+# substituted file should not be streamed into memory. The deadline the caller
+# applies would eventually kill a blocked probe, but not returning at all is
+# still the wrong behaviour for something that runs every few seconds.
+if [[ -f $CONFIG && ! -L $CONFIG ]]; then
+  NAME="$(head -c 65536 "$CONFIG" \
+    | sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
+    | head -1)"
   # Undo the libconfig escaping airplay-write-config applies.
   NAME="${NAME//\\\"/\"}"
   NAME="${NAME//\\\\/\\}"
