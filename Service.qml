@@ -132,6 +132,23 @@ Item {
   // Generous: the spawn returns in well under a second, so this only fires if
   // setsid itself never comes back.
   readonly property string launcherDeadlineSec: "15"
+  // A live ceiling on what a child may hand back.
+  //
+  // The deadline bounds how long a process runs; this bounds how much it can
+  // return while running. StdioCollector exposes no cap of its own, but with
+  // waitForEnd false it emits dataChanged as the buffer grows, so the size can
+  // be checked as it arrives and the process killed the moment it goes over --
+  // rather than discovering it after the whole thing has been buffered. The
+  // text is still complete at onExited for a process that finishes normally.
+  //
+  // 64 KiB is far above anything these can legitimately produce: the probes
+  // emit a fixed set of JSON keys with capped fields, measured at a little over
+  // 200 bytes. It is a ceiling on runaway output, not a working limit.
+  readonly property int maxChildBytes: 65536
+  property bool _statusCapped: false
+  property bool _firewallCapped: false
+  property bool _actionCapped: false
+
   readonly property string probeKillAfter: "--kill-after=5s"
   readonly property string actionKillAfter: "--kill-after=10s"
 
@@ -544,10 +561,29 @@ Item {
     running: false
     clearEnvironment: true
     environment: root.sealedEnv
-    stdout: StdioCollector { id: statusOut; waitForEnd: true }
-    stderr: StdioCollector { id: statusErr; waitForEnd: true }
+    stdout: StdioCollector {
+      id: statusOut
+      waitForEnd: false
+      onDataChanged: if (text.length > root.maxChildBytes && statusProcess.running) {
+        root._statusCapped = true
+        statusProcess.signal(15)
+      }
+    }
+    stderr: StdioCollector {
+      id: statusErr
+      waitForEnd: false
+      onDataChanged: if (text.length > root.maxChildBytes && statusProcess.running) {
+        root._statusCapped = true
+        statusProcess.signal(15)
+      }
+    }
     onExited: function(exitCode) {
       root.probed = true
+      if (root._statusCapped) {
+        root._statusCapped = false
+        root.lastError = "Receiver status returned more data than expected"
+        return
+      }
       if (exitCode === 124) {
         root.lastError = "Timed out reading receiver status"
         return
@@ -580,8 +616,16 @@ Item {
     running: false
     clearEnvironment: true
     environment: root.sealedEnv
-    stdout: StdioCollector { id: firewallOut; waitForEnd: true }
+    stdout: StdioCollector {
+      id: firewallOut
+      waitForEnd: false
+      onDataChanged: if (text.length > root.maxChildBytes && firewallProcess.running) {
+        root._firewallCapped = true
+        firewallProcess.signal(15)
+      }
+    }
     onExited: function(exitCode) {
+      if (root._firewallCapped) { root._firewallCapped = false; return }
       if (exitCode !== 0) return
       try {
         var f = JSON.parse(String(firewallOut.text || "{}"))
@@ -600,7 +644,14 @@ Item {
     running: false
     clearEnvironment: true
     environment: root.sealedEnv
-    stderr: StdioCollector { id: actionErr; waitForEnd: true }
+    stderr: StdioCollector {
+      id: actionErr
+      waitForEnd: false
+      onDataChanged: if (text.length > root.maxChildBytes && actionProcess.running) {
+        root._actionCapped = true
+        actionProcess.signal(15)
+      }
+    }
     onExited: function(exitCode) {
       var action = root.pendingAction
 
@@ -616,7 +667,11 @@ Item {
       root._queuedSteps = []
       if (exitCode !== 0) {
         var err = String(actionErr.text || "").trim()
-        if (exitCode === 124)
+        if (root._actionCapped) {
+          root._actionCapped = false
+          err = ""
+          root.lastError = "The " + action + " command returned more data than expected"
+        } else if (exitCode === 124)
           root.lastError = "Timed out trying to " + action + " the receiver"
         else
           root.lastError = err !== "" ? err : ("Could not " + action + " the receiver")

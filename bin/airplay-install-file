@@ -32,6 +32,7 @@ completely, or fails loudly.
 """
 
 import os
+import pwd
 import stat
 import sys
 
@@ -39,6 +40,59 @@ import sys
 def fail(message):
     print(f"airplay-install-file: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def real_home():
+    """The home directory from the passwd database, not the environment.
+
+    The same source systemd's %h uses, so the scripts and the unit cannot
+    disagree about where anything lives.
+    """
+    return pwd.getpwuid(os.getuid()).pw_dir
+
+
+def open_dir_under_home(path):
+    """Open a directory, refusing a symlink at any component below $HOME.
+
+    Opening the destination O_NOFOLLOW only checks the last component. A
+    symlink swapped in higher up -- ~/.local, or ~/.local/state -- redirects
+    the write just as effectively, and those are directories this user can
+    replace. So each component below the home directory is opened O_NOFOLLOW
+    in turn, walking down from a descriptor on the home itself.
+
+    The home directory and everything above it is resolved normally. A
+    symlinked /home or a symlinked home directory is a legitimate thing for an
+    administrator to arrange, and refusing it would break working systems to
+    defend against someone who would already need root to set it up.
+
+    Refusing a destination outside the home directory is deliberate: this
+    installer has no business writing anywhere else.
+    """
+    home = os.path.realpath(real_home())
+    # Not realpath: resolving the tail here would quietly follow exactly the
+    # symlinks the walk below exists to refuse.
+    target = os.path.abspath(path)
+    if target != home and not target.startswith(home + os.sep):
+        fail(f"refusing to write outside {home}: {target}")
+
+    fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY)
+    rest = os.path.relpath(target, home)
+    if rest == ".":
+        return fd
+    try:
+        for part in rest.split(os.sep):
+            if part in ("", "."):
+                continue
+            if part == "..":
+                fail(f"refusing a path that climbs out of {home}: {target}")
+            nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                          dir_fd=fd)
+            os.close(fd)
+            fd = nfd
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def main(argv):
@@ -62,10 +116,8 @@ def main(argv):
     except OSError as exc:
         fail(f"cannot read {src}: {exc.strerror}")
 
-    # O_NOFOLLOW covers the final component, so this refuses a state directory
-    # that is itself a symlink. Its parents are ordinary XDG directories.
     try:
-        dir_fd = os.open(dest_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        dir_fd = open_dir_under_home(dest_dir)
     except OSError as exc:
         fail(f"cannot open directory {dest_dir}: {exc.strerror}")
 
