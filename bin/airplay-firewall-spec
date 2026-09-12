@@ -15,6 +15,30 @@
 #   * removal re-issues the same spec with `ufw --force delete`, so it is
 #     idempotent and tolerant of rules already gone
 
+# Resolve every external command from the system path only.
+#
+# This file is sourced, so it sets PATH in the caller. That is deliberate:
+# every script that sources it pins the same value first, and the helper
+# functions below call ip, awk and python3 themselves -- they should be safe
+# even if something sources this without pinning.
+#
+# The session PATH this inherits puts user-writable directories ahead of
+# /usr/bin -- on the development machine there were six of them, with
+# ~/.local/share/mise/shims at position 7 and /usr/bin only at 10. Anything
+# able to drop a file in one of those could substitute itself for sudo, ufw,
+# systemctl or pacman in any privileged step. Every tool this file
+# uses ships in /usr/bin, including Omarchy's own commands (omarchy-pkg-add
+# and omarchy-snapshot are installed there by the omarchy package), so a
+# single literal path covers all of them and needs no lookup through anything
+# the user can write to. On Arch /bin and /sbin are symlinks into /usr/bin.
+#
+# Hardcoded rather than taken from $OMARCHY_PATH on purpose: that variable is
+# exported into the session and is therefore itself inherited, so trusting it
+# would reintroduce exactly the problem this closes. A literal path fails
+# loudly with "command not found" instead of silently running something else.
+PATH=/usr/bin
+export PATH
+
 OMAIRPLAY_UFW_COMMENT="omairplay"
 
 # Exactly the list Omarchy uses for Sunshine.

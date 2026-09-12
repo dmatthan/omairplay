@@ -29,6 +29,19 @@ Item {
   readonly property string pluginDir: home + "/.config/omarchy/plugins/io.github.dmatthan.omairplay"
   readonly property string unit: "omarchy-airplay.service"
 
+  // Absolute paths for everything spawned from here.
+  //
+  // Quickshell resolves a Process command through the PATH the shell inherited,
+  // and that PATH puts user-writable directories ahead of /usr/bin -- six of
+  // them on the development machine, with /usr/bin only at position 10. A bare
+  // "systemctl" is therefore a lookup through space the user can write to,
+  // inside a long-running process. All three of these ship in /usr/bin; the
+  // omarchy package installs its own commands there too.
+  readonly property string binSystemctl: "/usr/bin/systemctl"
+  readonly property string binNotifySend: "/usr/bin/notify-send"
+  readonly property string binTerminal:
+    "/usr/bin/omarchy-launch-floating-terminal-with-presentation"
+
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
     return value === undefined || value === null ? fallback : value
@@ -233,7 +246,7 @@ Item {
     // "first one" flag, so a song that starts later is still announced.
     if (Date.now() - _serviceLoadedAt < 5000) return
 
-    var args = ["notify-send", "-a", "OmairPlay"]
+    var args = [binNotifySend, "-a", "OmairPlay"]
     var art = String(artUrl || "")
     if (art.indexOf("file://") === 0)
       args.push("-i", decodeURIComponent(art.substring(7)))
@@ -268,13 +281,13 @@ Item {
   function start() {
     if (busy || !setupComplete) return
     desiredRunning = 1
-    runAction("start", ["systemctl", "--user", "start", unit])
+    runAction("start", [binSystemctl, "--user", "start", unit])
   }
 
   function stop() {
     if (busy) return
     desiredRunning = 0
-    runAction("stop", ["systemctl", "--user", "stop", unit])
+    runAction("stop", [binSystemctl, "--user", "stop", unit])
   }
 
   function toggle() {
@@ -286,13 +299,13 @@ Item {
   // playback, so the popup only offers it rather than doing it automatically.
   function restart() {
     if (busy || !setupComplete) return
-    runAction("restart", ["systemctl", "--user", "restart", unit])
+    runAction("restart", [binSystemctl, "--user", "restart", unit])
   }
 
   function setStartAtLogin(enabled) {
     if (busy || !setupComplete) return
     runAction(enabled ? "enable" : "disable",
-              ["systemctl", "--user", enabled ? "enable" : "disable", unit])
+              [binSystemctl, "--user", enabled ? "enable" : "disable", unit])
   }
 
   // Regenerates the whole config from the plugin's settings. The receiver only
@@ -312,8 +325,8 @@ Item {
     var script = "set -e; " + Util.shellQuote(pluginDir + "/bin/airplay-write-config")
       + " --name " + Util.shellQuote(wanted)
     if (restartIfRunning && running)
-      script += "; systemctl --user restart " + Util.shellQuote(unit)
-    runAction("name", ["bash", "-c", script])
+      script += "; " + binSystemctl + " --user restart " + Util.shellQuote(unit)
+    runAction("name", ["/usr/bin/bash", "-c", script])
   }
 
   // Privileged setup runs visibly in Omarchy's floating terminal, which is
@@ -332,7 +345,7 @@ Item {
 
   function launchInTerminal(command) {
     Quickshell.execDetached([
-      "omarchy-launch-floating-terminal-with-presentation", command
+      binTerminal, command
     ])
     // The terminal changes state behind our back, so start watching for it
     // rather than waiting for the next scheduled poll.
