@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3 -I
 """Install one file into a directory without following symlinks.
 
     airplay-install-file SRC DEST MODE

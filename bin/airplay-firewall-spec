@@ -101,7 +101,7 @@ omairplay_present_v4_cidrs() {
   local -a present=()
   while read -r addr; do
     for cidr in "${OMAIRPLAY_V4_CIDRS[@]}"; do
-      if python3 -c '
+      if python3 -I -c '
 import ipaddress, sys
 sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2]) else 1)
 ' "$addr" "$cidr" 2>/dev/null; then
@@ -118,7 +118,7 @@ omairplay_global_v6_prefixes() {
   local addr prefix
   while read -r addr; do
     [[ -n $addr ]] || continue
-    prefix="$(python3 -c '
+    prefix="$(python3 -I -c '
 import ipaddress, sys
 print(ipaddress.IPv6Network(sys.argv[1] + "/64", strict=False))
 ' "$addr" 2>/dev/null)" || continue

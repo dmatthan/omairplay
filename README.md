@@ -172,7 +172,9 @@ permissions — this one included. What that means here:
 - Removal works from the `omairplay` tag on each rule, so it needs no saved
   list and never executes a command read from a file.
 - Every command either half of the plugin runs is named by its full path, so
-  nothing is resolved through a `PATH` you can write to.
+  nothing is resolved through a `PATH` you can write to. The setup and removal
+  scripts restart themselves in an environment they build from scratch, so
+  nothing inherited from your session can change what they run.
 - The files setup places outside the plugin folder are written to exactly the
   path named, or not at all: it refuses to write through a symlink, and each
   file is moved into place in one step rather than copied over the old one.
