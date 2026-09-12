@@ -64,6 +64,7 @@ Item {
   readonly property string binTerminal:
     "/usr/bin/omarchy-launch-floating-terminal-with-presentation"
   readonly property string binTimeout: "/usr/bin/timeout"
+  readonly property string binSetsid: "/usr/bin/setsid"
 
   // The environment handed to every child spawned from here.
   //
@@ -127,6 +128,10 @@ Item {
   // SIGTERM and then waits indefinitely, so a child that ignores the signal
   // outlives its own deadline -- measured at 30s against a 3s limit. The grace
   // period then escalates to SIGKILL. Omarchy's own scripts use the same form.
+  readonly property string launcherKillAfter: "--kill-after=5s"
+  // Generous: the spawn returns in well under a second, so this only fires if
+  // setsid itself never comes back.
+  readonly property string launcherDeadlineSec: "15"
   readonly property string probeKillAfter: "--kill-after=5s"
   readonly property string actionKillAfter: "--kill-after=10s"
 
@@ -469,13 +474,26 @@ Item {
   // shell -- before the setup script exists to seal anything. Sealing only our
   // own scripts left that open, on the one path that asks for a password.
   //
-  // No deadline, unlike the probes: measured, a timeout around the launcher
-  // propagates into the terminal session and kills it (uwsm-app stays in the
-  // foreground), which would cut off setup mid-password. The launcher itself
-  // returns immediately.
+  // Bounded, but around setsid rather than around the launcher directly.
+  //
+  // A timeout placed straight on the launcher reaches the terminal: uwsm-app
+  // stays in the foreground, so the deadline lands on the session and kills it.
+  // Measured -- the command inside started, then died at the deadline, which in
+  // practice means setup cut off while the password prompt is open.
+  //
+  // setsid forks and its parent returns at once, so the deadline applies to the
+  // spawn and the session continues in a new session of its own. Measured the
+  // same way: exit 0 in under a second, terminal still alive well past the
+  // deadline.
+  //
+  // Being straight about what this bounds: the spawn, not the session. An
+  // interactive terminal someone is typing a password into cannot be given a
+  // time limit, and should not be. What it prevents is a wedged spawn sitting
+  // around for ever.
   function launchInTerminal(command) {
     Quickshell.execDetached({
-      command: [binTerminal, command],
+      command: [binTimeout, launcherKillAfter, launcherDeadlineSec,
+                binSetsid, binTerminal, command],
       clearEnvironment: true,
       environment: sealedTerminalEnv
     })
