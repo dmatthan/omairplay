@@ -138,7 +138,7 @@ The `shairport-sync` and `nqptp` packages stay installed.
 | `~/.config/systemd/user/omarchy-airplay.service` | the service that runs the receiver |
 | `~/.cache/shairport-sync/` | cover art |
 | `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller and the helpers the service needs |
-| `ufw` rules | 11, each tagged `omairplay`, private ranges only |
+| `ufw` rules | each tagged `omairplay`, private ranges only — the count depends on which ranges your machine is on |
 | `nqptp.service` | enabled, for AirPlay 2 clock sync |
 | `shairport-sync`, `nqptp` | packages, from Arch `extra` |
 

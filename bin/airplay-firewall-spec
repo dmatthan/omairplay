@@ -54,7 +54,17 @@ OMAIRPLAY_V6_CIDRS=(fe80::/10 fc00::/7)
 # down: 7000 is AirPlay 2's RTSP listener, 319 and 320 are nqptp's PTP clock
 # sync, and 5353 is mDNS.
 OMAIRPLAY_V4_PORTS=("7000:tcp" "319,320,5353:udp")
-OMAIRPLAY_V6_PORTS=("319,320:udp")
+# The same set on IPv6, not just PTP.
+#
+# This used to be ("319,320:udp") on the assumption that IPv6 was needed only
+# for nqptp's clock sync. That was wrong: when the router hands out a
+# unique-local or global prefix, iOS establishes the whole AirPlay session over
+# IPv6 -- RTSP on 7000 and mDNS on 5353 included. Observed as [UFW BLOCK] lines
+# for TCP 7000 from both the phone's ULA and its global address, with the
+# session half-working: the control channel had come up on IPv4, so metadata and
+# cover art arrived and the track showed as playing, while the audio went
+# nowhere.
+OMAIRPLAY_V6_PORTS=("7000:tcp" "319,320,5353:udp")
 
 # Emit every rule as "<cidr>|<ports>|<proto>", one per line.
 #
@@ -91,6 +101,13 @@ omairplay_rules() {
       printf '%s|%s:%s|tcp\n' "$cidr" "$low" "$high"
       printf '%s|%s:%s|udp\n' "$cidr" "$low" "$high"
     done
+    # And the same on IPv6, for the same reason: once a session establishes over
+    # IPv6 its data channels are IPv6 too. Same narrowing as above -- only the
+    # ranges this machine actually holds an address in.
+    for cidr in $(omairplay_present_v6_cidrs) ${extra+"${extra[@]}"}; do
+      printf '%s|%s:%s|tcp\n' "$cidr" "$low" "$high"
+      printf '%s|%s:%s|udp\n' "$cidr" "$low" "$high"
+    done
   fi
 }
 
@@ -110,6 +127,19 @@ sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv
     done
   done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')
   printf '%s\n' ${present+"${present[@]}"} | awk 'NF && !seen[$0]++'
+}
+
+# Which of the static IPv6 ranges this machine actually holds an address in.
+# fe80::/10 is present on every interface and is unroutable by definition, so it
+# needs no check. fc00::/7 is only worth opening when a unique-local address is
+# actually configured.
+omairplay_present_v6_cidrs() {
+  printf '%s\n' 'fe80::/10'
+  if ip -6 -o addr show 2>/dev/null \
+    | awk '{split($4,a,"/"); print a[1]}' \
+    | grep -qiE '^f[cd]'; then
+    printf '%s\n' 'fc00::/7'
+  fi
 }
 
 # The globally-routable IPv6 /64s this machine currently has, if any. The only
