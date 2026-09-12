@@ -224,8 +224,8 @@ fi
 
 # Placed with the installer rather than moved into position directly.
 #
-# mktemp in the destination plus mv is already exclusive and atomic, but the
-# mkdir -p above follows symlinks, so a link left at ~/.config or
+# mktemp in the destination plus mv is already exclusive and atomic, but it
+# resolves the destination by name, so a link left at ~/.config or
 # ~/.config/shairport-sync would put this file somewhere else -- and
 # shairport-sync's config format has sessioncontrol hooks that run commands, so
 # where it lands matters. The installer refuses a symlink at any component
