@@ -142,7 +142,7 @@ Everything, in one place:
 | `~/.config/shairport-sync/shairport-sync.conf` | the receiver's config, generated from your settings |
 | `~/.config/systemd/user/omarchy-airplay.service` | the user service that runs the receiver |
 | `~/.cache/shairport-sync/` | cover art the receiver receives |
-| `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller, the audio-readiness helper the service runs, and a note recording whether setup enabled `nqptp` |
+| `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller, the audio-readiness helper the service runs, the firewall rule list they share, and a note recording whether setup enabled `nqptp` |
 | `ufw` rules | 11, each tagged `omairplay`, private ranges only |
 | `nqptp.service` | enabled, for AirPlay 2 clock sync |
 | `shairport-sync`, `nqptp` | packages, from Arch `extra` |
@@ -171,6 +171,11 @@ permissions — this one included. What that means here:
   private ranges this machine actually holds an address in.
 - Removal works from the `omairplay` tag on each rule, so it needs no saved
   list and never executes a command read from a file.
+- Every command either half of the plugin runs is named by its full path, so
+  nothing is resolved through a `PATH` you can write to.
+- The files setup places outside the plugin folder are written to exactly the
+  path named, or not at all: it refuses to write through a symlink, and each
+  file is moved into place in one step rather than copied over the old one.
 - Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable,
   so checking it needs no privilege.
 - Your local network is the trust boundary: a device has to be on it to reach
