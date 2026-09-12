@@ -92,6 +92,37 @@ Item {
     return e
   }
 
+  // The launcher needs more than the probes do, because it starts a graphical
+  // terminal. Same closed base, plus the session variables that terminal
+  // genuinely requires -- passed through only when they are actually set, so a
+  // different session shape degrades rather than breaks.
+  //
+  // LC_ALL is deliberately absent here. The probes pin it to C for
+  // deterministic parsing, but this environment reaches a terminal a person
+  // reads: C would mangle the UTF-8 in Omarchy's logo and gum widgets. LANG is
+  // passed instead, and airplay-setup re-pins LC_ALL=C for itself on re-exec,
+  // so the scripts still parse deterministically.
+  readonly property var sealedTerminalEnv: {
+    var e = {
+      "PATH": "/usr/bin",
+      "OMARCHY_PATH": "/usr/share/omarchy",
+      "HOME": home,
+      "TERM": "xterm-256color"
+    }
+    var user = Quickshell.env("USER")
+    if (user) { e["USER"] = user; e["LOGNAME"] = user }
+    var pass = ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+                "WAYLAND_DISPLAY", "DISPLAY",
+                "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE",
+                "XDG_DATA_DIRS", "XDG_CONFIG_DIRS",
+                "HYPRLAND_INSTANCE_SIGNATURE", "LANG"]
+    for (var i = 0; i < pass.length; i++) {
+      var v = Quickshell.env(pass[i])
+      if (v) e[pass[i]] = v
+    }
+    return e
+  }
+
   // A deadline timeout(1) will actually enforce. Without --kill-after it sends
   // SIGTERM and then waits indefinitely, so a child that ignores the signal
   // outlives its own deadline -- measured at 30s against a 3s limit. The grace
@@ -428,15 +459,26 @@ Item {
     launchInTerminal(Util.shellQuote(pluginDir + "/bin/airplay-remove") + " --system")
   }
 
-  // Deliberately not given the sealed environment, unlike everything else here.
-  // This launches a graphical terminal, which needs the session's Wayland,
-  // portal and theme variables to appear at all. The script it runs re-execs
-  // itself into a closed environment as its first action, so the privileged
-  // work is sealed regardless of what this launcher inherits.
+  // Sealed like everything else here, and this one matters most: it is the
+  // entry point to the privileged setup and removal.
+  //
+  // The launcher is an Omarchy script that `source`s omarchy-restart-gum and
+  // calls setsid, uwsm-app, xdg-terminal-exec, bash, omarchy-show-logo and
+  // omarchy-show-done by bare name. Handed an inherited PATH, a file planted
+  // earlier in it runs -- a `source`, so arbitrary code in the launcher's own
+  // shell -- before the setup script exists to seal anything. Sealing only our
+  // own scripts left that open, on the one path that asks for a password.
+  //
+  // No deadline, unlike the probes: measured, a timeout around the launcher
+  // propagates into the terminal session and kills it (uwsm-app stays in the
+  // foreground), which would cut off setup mid-password. The launcher itself
+  // returns immediately.
   function launchInTerminal(command) {
-    Quickshell.execDetached([
-      binTerminal, command
-    ])
+    Quickshell.execDetached({
+      command: [binTerminal, command],
+      clearEnvironment: true,
+      environment: sealedTerminalEnv
+    })
     // The terminal changes state behind our back, so start watching for it
     // rather than waiting for the next scheduled poll.
     catchUpTimer.restart()
