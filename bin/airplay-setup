@@ -195,7 +195,7 @@ else
       "$INSTALL_FILE <note> $STATE_DIR/enabled-nqptp 0644"
   else
     printf '%s\n' "${NOTE_LINES[@]}" \
-      | "$INSTALL_FILE" /dev/stdin "$STATE_DIR/enabled-nqptp" 0644
+      | "$INSTALL_FILE" --stdin "$STATE_DIR/enabled-nqptp" 0644
   fi
 fi
 if systemctl is-active nqptp.service &>/dev/null; then
