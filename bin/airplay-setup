@@ -178,7 +178,7 @@ if [[ "$(systemctl is-enabled nqptp.service 2>/dev/null)" == "enabled" ]]; then
   echo "nqptp.service was already enabled; leaving that alone."
 else
   run sudo systemctl enable nqptp.service
-  run mkdir -p "$STATE_DIR"
+  run "$INSTALL_FILE" --mkdir "$STATE_DIR" 0700
   # Through the installer rather than a > redirect, which would follow a
   # symlink left at this path and write the note through it.
   #
@@ -318,7 +318,7 @@ fi
 #
 # airplay-remove derives every path from $HOME and references nothing inside
 # the plugin folder, so a copy next to the firewall record works standalone.
-run mkdir -p "$STATE_DIR"
+run "$INSTALL_FILE" --mkdir "$STATE_DIR" 0700
 run "$INSTALL_FILE" "$PLUGIN_DIR/bin/airplay-remove" "$STATE_DIR/airplay-remove" 0755
 # The unit's audio gate lives here too, so the receiver keeps working even if
 # the plugin is removed. See the comment in share/omarchy-airplay.service.
@@ -327,7 +327,7 @@ run "$INSTALL_FILE" "$PLUGIN_DIR/bin/airplay-wait-audio" "$STATE_DIR/airplay-wai
 # to travel with it.
 run "$INSTALL_FILE" "$PLUGIN_DIR/bin/airplay-firewall-spec" "$STATE_DIR/airplay-firewall-spec" 0644
 
-run mkdir -p "$UNIT_DIR"
+run "$INSTALL_FILE" --mkdir "$UNIT_DIR" 0755
 # Copied verbatim -- the unit resolves the home directory itself with %h, so
 # there is nothing to interpolate. Nothing in it is built from an inherited
 # value.

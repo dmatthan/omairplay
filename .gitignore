@@ -10,3 +10,6 @@ NOTES.md
 # imported rather than executed. Never wanted in the published plugin.
 __pycache__/
 *.pyc
+
+# Working reference on the marketplace reviewer's standard.
+REVIEW-STANDARD.md

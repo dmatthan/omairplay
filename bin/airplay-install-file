@@ -80,6 +80,13 @@ def read_regular_file(path):
             os.close(fd)
 
 
+def parse_mode(text):
+    try:
+        return int(text, 8)
+    except ValueError:
+        fail(f"mode must be octal, got {text!r}")
+
+
 def real_home():
     """The home directory from the passwd database, not the environment.
 
@@ -87,6 +94,54 @@ def real_home():
     disagree about where anything lives.
     """
     return pwd.getpwuid(os.getuid()).pw_dir
+
+
+def make_dir_under_home(path, mode):
+    """Create a directory, component by component, following no symlink.
+
+    `mkdir -p` is one of the "ordinary pathname operations" this file exists to
+    replace: it walks the path by name, so a symlink anywhere along it silently
+    redirects where the directory ends up -- and everything installed into it
+    afterwards. Each component here is created with mkdirat through a retained
+    descriptor and reopened O_NOFOLLOW, so a link found on the way is an error
+    rather than a redirection.
+
+    The mode is applied to the final component on every run, not only when it
+    is created, so a directory left behind by an earlier version is corrected
+    rather than kept as it was.
+    """
+    home = os.path.realpath(real_home())
+    target = os.path.abspath(path)
+    if target != home and not target.startswith(home + os.sep):
+        fail(f"refusing to create a directory outside {home}: {target}")
+
+    fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY)
+    rest = os.path.relpath(target, home)
+    if rest == ".":
+        os.close(fd)
+        return
+    try:
+        for part in rest.split(os.sep):
+            if part in ("", "."):
+                continue
+            if part == "..":
+                fail(f"refusing a path that climbs out of {home}: {target}")
+            try:
+                os.mkdir(part, mode, dir_fd=fd)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                fail(f"cannot create {target}: {exc.strerror}")
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                              dir_fd=fd)
+            except OSError as exc:
+                fail(f"cannot enter {part} under {home}: {exc.strerror}")
+            os.close(fd)
+            fd = nfd
+        os.fchmod(fd, mode)
+    finally:
+        os.close(fd)
 
 
 def open_dir_under_home(path):
@@ -134,14 +189,17 @@ def open_dir_under_home(path):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[0] == "--mkdir":
+        _, dest, mode_text = argv
+        make_dir_under_home(dest, parse_mode(mode_text))
+        print(f"Created {dest}")
+        return
     if len(argv) != 3:
-        fail("usage: airplay-install-file SRC DEST MODE")
+        fail("usage: airplay-install-file SRC DEST MODE\n"
+             "       airplay-install-file --mkdir DIR MODE")
     src, dest, mode_text = argv
 
-    try:
-        mode = int(mode_text, 8)
-    except ValueError:
-        fail(f"mode must be octal, got {mode_text!r}")
+    mode = parse_mode(mode_text)
 
     dest_dir = os.path.dirname(dest) or "."
     name = os.path.basename(dest)

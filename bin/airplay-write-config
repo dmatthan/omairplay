@@ -199,7 +199,10 @@ MSG
   exit 3
 fi
 
-mkdir -p "$CONFIG_DIR" "$CACHE_DIR/coverart"
+# Through the installer as well: mkdir -p walks by name, so a symlink on the
+# way redirects where the config and the cover-art cache end up.
+"$INSTALL_FILE" --mkdir "$CONFIG_DIR" 0700 >/dev/null
+"$INSTALL_FILE" --mkdir "$CACHE_DIR/coverart" 0700 >/dev/null
 TMP="$(mktemp "$CONFIG_DIR/.shairport-sync.conf.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 render >"$TMP"
