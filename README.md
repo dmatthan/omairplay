@@ -4,13 +4,15 @@
 
 Turn your Omarchy machine into an AirPlay speaker with your iPhone as the remote.
 
-Tired of Apple Music not allowing remote play? No problem. Skip the broken Linux client: play from your iPhone straight to your system speakers, headphones, etc. Choose your machine
-from the iOS AirPlay list, and the audio comes out of your system.
+Tired of Apple Music not allowing remote play? No problem. Skip the broken
+Linux client: choose your machine from the iOS AirPlay list, and the audio
+comes out of your speakers, headphones, whatever you have.
 
-This plugin adds a GUI and convenience features to the terminal tool `shairport-sync`. OmairPlay simplifies the setup and implements a seamless experience: it installs what's needed, opens only
-the firewall ports AirPlay actually uses and only to your local network, puts
-the receiver's state in your bar, and shows what's playing — all using your current
-Omarchy theme, of course!
+This plugin adds a GUI and convenience features to the terminal tool
+`shairport-sync`. It installs what's needed, opens only the firewall ports
+AirPlay actually uses and only to your local network, puts the receiver's state
+in your bar, and shows what's playing — all using your current Omarchy theme,
+of course!
 
 ## Requirements
 
@@ -109,81 +111,55 @@ setup picks up your current addresses.
 
 ## Removing it
 
-Two steps, and the order matters.
+Two steps, in this order.
 
-1. **Remove receiver** in the popup. This undoes the setup: it stops the
-   receiver, disables it at login, deletes its config and cover-art cache,
-   removes the firewall rules it added, and turns the `nqptp` system service
-   back off if setup was the thing that enabled it.
-2. Then remove the plugin itself:
+1. **Remove receiver** in the popup. Stops the receiver, disables it at login,
+   deletes its config and cover art, removes the firewall rules it added, and
+   turns `nqptp` back off if setup was what enabled it.
+2. Remove the plugin:
 
    ```bash
    omarchy plugin remove io.github.dmatthan.omairplay
    ```
 
-Setup also keeps a copy of the uninstaller outside the plugin folder, so it
-works on its own:
+If you remove the plugin first, the uninstaller still works from its own copy:
 
 ```bash
 ~/.local/state/io.github.dmatthan.omairplay/airplay-remove --system
 ```
 
-Every rule it adds carries the `omairplay` tag, and the uninstaller finds them
-by that tag.
-
 The `shairport-sync` and `nqptp` packages stay installed.
 
 ## What it puts on your system
 
-Everything, in one place:
-
 | Path | What it is |
 |---|---|
-| `~/.config/shairport-sync/shairport-sync.conf` | the receiver's config, generated from your settings |
-| `~/.config/systemd/user/omarchy-airplay.service` | the user service that runs the receiver |
-| `~/.cache/shairport-sync/` | cover art the receiver receives |
-| `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller, the audio-readiness helper the service runs, the firewall rule list they share, and a note recording whether setup enabled `nqptp` |
+| `~/.config/shairport-sync/shairport-sync.conf` | the receiver's config, from your settings |
+| `~/.config/systemd/user/omarchy-airplay.service` | the service that runs the receiver |
+| `~/.cache/shairport-sync/` | cover art |
+| `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller and the helpers the service needs |
 | `ufw` rules | 11, each tagged `omairplay`, private ranges only |
 | `nqptp.service` | enabled, for AirPlay 2 clock sync |
 | `shairport-sync`, `nqptp` | packages, from Arch `extra` |
 
-Nothing is written outside `$HOME` apart from those last three. No autostart
-entries, no `PATH` changes, no shell-profile edits, no scheduled jobs.
-
-The two executables in `~/.local/state/` are there on purpose: removing the
-plugin deletes its folder, and the receiver would stop working if its service
-pointed into it. Keeping them outside means the service survives, and the
-uninstaller is still available to undo the firewall rules and the `nqptp`
-service afterwards. Both are removed when the uninstaller finishes.
+Only the last three touch anything outside `$HOME`. No autostart entries, no
+`PATH` changes, no shell-profile edits, no scheduled jobs. Removal reverses all
+of it.
 
 ## Notes on safety
 
-Omarchy plugins run unsandboxed inside the shell process, with your user's
-permissions — this one included. What that means here:
+Omarchy plugins run unsandboxed, with your user's permissions — this one
+included. What that means here:
 
-- Root is used only by `bin/airplay-setup` and `bin/airplay-remove`, both run
-  visibly in a terminal. Neither is invoked with `pkexec`: the plugin folder is
-  user-writable, so running a script from it as root would be a way to escalate.
-- Firewall rules are limited to private address ranges — RFC1918, plus IPv6
-  link-local and unique-local — following the same convention as Omarchy's own
-  installers. `ufw` is never disabled or reset. The widest rule, the kernel
-  ephemeral range AirPlay 2 uses for its audio channels, is limited to the
-  private ranges this machine actually holds an address in.
-- Removal works from the `omairplay` tag on each rule, so it needs no saved
-  list and never executes a command read from a file.
-- Every command either half of the plugin runs is named by its full path, so
-  nothing is resolved through a `PATH` you can write to. The setup and removal
-  scripts restart themselves in an environment they build from scratch, so
-  nothing inherited from your session can change what they run.
-- The files setup places outside the plugin folder are written to exactly the
-  path named, or not at all: it refuses to write through a symlink, and each
-  file is moved into place in one step rather than copied over the old one.
-- Firewall *state* is read from `/etc/ufw/user.rules`, which is world-readable,
-  so checking it needs no privilege.
+- Root is used only by setup and removal, both run visibly in a terminal so you
+  can read every command before approving it.
+- Firewall rules are limited to private address ranges, never to Anywhere, and
+  `ufw` is never disabled or reset. Every rule is tagged `omairplay`, and
+  removal finds them by that tag.
 - Your local network is the trust boundary: a device has to be on it to reach
   the receiver.
-- Nothing is written outside `$HOME`, apart from the packages and the `nqptp`
-  system service enabled during setup.
+- Commands are called by full path, in an environment the scripts build
+  themselves, so nothing inherited from your session changes what runs.
 
 ## Licence
 
