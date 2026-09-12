@@ -26,7 +26,29 @@ Item {
   property var settings: ({})
 
   readonly property string home: Quickshell.env("HOME") || ""
-  readonly property string pluginDir: home + "/.config/omarchy/plugins/io.github.dmatthan.omairplay"
+
+  // Where this plugin's own executables live, taken from the QML engine rather
+  // than rebuilt out of $HOME.
+  //
+  // This used to be home + "/.config/omarchy/plugins/<id>", which meant the
+  // path we run helpers from was derived from an inherited value -- the same
+  // ambient resolution the PATH pin exists to remove, and worse, because it
+  // decides which files get executed rather than merely where to look for a
+  // command. Qt.resolvedUrl(".") is the engine's own record of where this file
+  // was loaded from and cannot be influenced by the environment.
+  //
+  // The host does not offer an alternative: it deletes __sourceDir from the
+  // manifest before handing it to a third-party plugin (shell.qml,
+  // publicPluginManifest), and `manifest` is still null when this is first
+  // evaluated. The $HOME form is kept only as a fallback.
+  readonly property string pluginDir: {
+    var u = String(Qt.resolvedUrl("."))
+    if (u.indexOf("file://") === 0) {
+      u = decodeURIComponent(u.substring(7)).replace(/\/+$/, "")
+      if (u !== "") return u
+    }
+    return home + "/.config/omarchy/plugins/io.github.dmatthan.omairplay"
+  }
   readonly property string unit: "omarchy-airplay.service"
 
   // Absolute paths for everything spawned from here.
