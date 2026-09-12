@@ -102,15 +102,12 @@ omarchy bar move io.github.dmatthan.omairplay --section right
 ## If your phone sees the speaker but won't connect
 
 Check the firewall. mDNS discovery reaches you through `ufw` on its own, so the
-speaker can appear on your phone while the connection is still blocked.
+speaker can appear on your phone while the connection is still blocked. The
+same cause shows up as a track that displays but plays nothing, when only the
+audio channels are blocked, and after your router hands out a new IPv6 prefix.
+
 OmairPlay reads the live `ufw` rules and says so in the popup, with a button to
-re-run setup.
-
-If it connects and shows the track but plays nothing, that is the same problem
-on the audio channels rather than the control one — again, re-run setup.
-
-The same applies after your router hands out a new IPv6 prefix. Re-running
-setup picks up your current addresses.
+re-run setup, which picks up your current addresses.
 
 ## Removing it
 
