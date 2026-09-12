@@ -375,7 +375,11 @@ Item {
     // "first one" flag, so a song that starts later is still announced.
     if (Date.now() - _serviceLoadedAt < 5000) return
 
-    var args = [binNotifySend, "-a", "OmairPlay"]
+    // Bounded like the rest. A notification is a short D-Bus call, and unlike
+    // the setup terminal there is nothing interactive to protect, so the
+    // deadline can sit directly on it.
+    var args = [binTimeout, probeKillAfter, probeDeadlineSec,
+                binNotifySend, "-a", "OmairPlay"]
     var art = String(artUrl || "")
     if (art.indexOf("file://") === 0)
       args.push("-i", decodeURIComponent(art.substring(7)))

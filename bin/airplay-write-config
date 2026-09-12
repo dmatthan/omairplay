@@ -63,6 +63,8 @@ fi
 shift
 
 
+HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+INSTALL_FILE="$HERE/airplay-install-file"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync"
 CONFIG_FILE="$CONFIG_DIR/shairport-sync.conf"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shairport-sync"
@@ -215,7 +217,17 @@ if [[ -f $CONFIG_FILE ]] \
   exit 0
 fi
 
-mv -f "$TMP" "$CONFIG_FILE"
+# Placed with the installer rather than moved into position directly.
+#
+# mktemp in the destination plus mv is already exclusive and atomic, but the
+# mkdir -p above follows symlinks, so a link left at ~/.config or
+# ~/.config/shairport-sync would put this file somewhere else -- and
+# shairport-sync's config format has sessioncontrol hooks that run commands, so
+# where it lands matters. The installer refuses a symlink at any component
+# below the home directory, which is the same check the state directory and the
+# unit get.
+"$INSTALL_FILE" "$TMP" "$CONFIG_FILE" 0644 >/dev/null
+rm -f "$TMP"
 trap - EXIT
 
 echo "Wrote $CONFIG_FILE"
