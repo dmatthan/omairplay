@@ -161,7 +161,9 @@ bold "2. Packages"
 if pacman -Q shairport-sync nqptp &>/dev/null; then
   echo "shairport-sync and nqptp are already installed."
 else
-  run omarchy-pkg-add shairport-sync nqptp
+  # nqptp is a dependency of shairport-sync. Naming it here would mark it as
+  # explicitly installed, and pacman -Rs shairport-sync would then leave it.
+  run omarchy-pkg-add shairport-sync
 fi
 echo
 
