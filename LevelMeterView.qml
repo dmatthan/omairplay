@@ -33,6 +33,8 @@ Item {
   readonly property int centrePx: Math.max(1, Math.round(Style.space(2) * dpr))
   readonly property int halfPx: Math.max(1, Math.floor((height * dpr - centrePx) / 2))
   readonly property int restPx: Math.max(1, Math.round(Style.space(2) * dpr))
+  // A third of the bar, so the tip stays centred and in proportion at any scale.
+  readonly property int tipStepPx: Math.floor(barPx / 3)
 
   // Motion: a whole number of physical pixels, on a whole number of frames.
   // Roughly a pixel per frame at 60 Hz; on a faster display the same step is
@@ -181,22 +183,34 @@ Item {
         height: root.height
         opacity: 0.4 + 0.6 * (index / root.barCount)
 
-        readonly property real corner: Style.cornerRadius > 0 ? width / 2 : 0
+        // Rounded themes get a stepped tip at both ends of each bar, one pixel
+        // step in from each side, instead of a smoothed radius. At this size an
+        // antialiased curve is only a blur; whole pixels keep the ends crisp.
+        readonly property int tipPx: Style.cornerRadius > 0 && px >= 3 * root.tipStepPx ? root.tipStepPx : 0
 
-        Rectangle {
-          width: parent.width
-          height: slot.px / root.dpr
-          y: (root.halfPx - slot.px) / root.dpr
-          radius: Math.min(slot.corner, height / 2)
-          color: slot.colour
-        }
+        Repeater {
+          model: [root.halfPx - slot.px, root.halfPx + root.centrePx]
 
-        Rectangle {
-          width: parent.width
-          height: slot.px / root.dpr
-          y: (root.halfPx + root.centrePx) / root.dpr
-          radius: Math.min(slot.corner, height / 2)
-          color: slot.colour
+          Item {
+            required property int modelData
+            y: modelData / root.dpr
+            width: parent.width
+            height: slot.px / root.dpr
+
+            Rectangle {
+              x: slot.tipPx / root.dpr
+              width: (root.barPx - 2 * slot.tipPx) / root.dpr
+              height: parent.height
+              color: slot.colour
+            }
+
+            Rectangle {
+              y: slot.tipPx / root.dpr
+              width: parent.width
+              height: (slot.px - 2 * slot.tipPx) / root.dpr
+              color: slot.colour
+            }
+          }
         }
       }
     }
