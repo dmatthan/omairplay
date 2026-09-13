@@ -59,14 +59,12 @@ Item {
   // Without this the node's properties are not kept live.
   PwObjectTracker { objects: root.streamNode ? [root.streamNode] : [] }
 
-  // The loudest peak per channel since the last tick. PipeWire reports more
-  // often than the meter draws, so keeping the maximum rather than whatever
-  // value happens to be current is what makes short transients show up.
-  property real _left: 0
-  property real _right: 0
-  property bool _fresh: false
-  property real _lastLeft: 0
-  property real _lastRight: 0
+  // The average peak since the last bar, both channels together. The mean
+  // follows vocal and arrangement changes markedly better than the maximum,
+  // which short drum transients dominate.
+  property real _sum: 0
+  property int _count: 0
+  property real _last: 0
 
   function clamp(v) {
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0
@@ -80,9 +78,8 @@ Item {
       if (!p || p.length === 0) return
       var l = root.clamp(p[0])
       var r = root.clamp(p.length > 1 ? p[1] : p[0])
-      if (l > root._left) root._left = l
-      if (r > root._right) root._right = r
-      root._fresh = true
+      root._sum += (l + r) / 2
+      root._count++
     }
   }
 
@@ -94,17 +91,13 @@ Item {
     running: root.live
     foreground: root.foreground
     accent: root.accent
-    // No report since the last bar: repeat the last values rather than draw a
+    // No report since the last bar: repeat the last value rather than draw a
     // gap that was never in the audio.
     onSampleNeeded: {
-      if (root._fresh) {
-        root._lastLeft = root._left
-        root._lastRight = root._right
-      }
-      view.push(root._lastLeft, root._lastRight)
-      root._left = 0
-      root._right = 0
-      root._fresh = false
+      if (root._count > 0) root._last = root._sum / root._count
+      view.push(root._last)
+      root._sum = 0
+      root._count = 0
     }
   }
 }

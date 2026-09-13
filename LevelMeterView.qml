@@ -2,12 +2,12 @@ import QtQuick
 import QtQuick.Window
 import qs.Commons
 
-// Stereo level history: left channel above the centre line, right below,
-// newest on the right. Asks for a sample through sampleNeeded() whenever it has
-// scrolled one bar, and draws what push(left, right) gives it.
+// Level history mirrored about a centre line, newest on the right. Asks for a
+// sample through sampleNeeded() each time it has scrolled one bar, and draws
+// what push(level) gives it.
 //
 // Amplitude only. There is no frequency data to draw a spectrum from, so this
-// shows what the peaks are actually doing rather than inventing bands.
+// shows what the level is actually doing rather than inventing bands.
 Item {
   id: root
 
@@ -50,8 +50,7 @@ Item {
 
   implicitHeight: Style.space(44)
 
-  property var leftLevels: blank()
-  property var rightLevels: blank()
+  property var levels: blank()
   property int offsetPx: 0
   property int _frames: 0
 
@@ -64,14 +63,12 @@ Item {
     return a
   }
 
-  // Per channel: a smoothed envelope in dB, its recent average, and how much it
-  // has recently been moving.
-  property var _state: [null, null]
   readonly property real silenceDb: -54
 
   function reset() {
-    leftLevels = blank(); rightLevels = blank()
-    _state = [null, null]
+    levels = blank()
+    _envelope = null
+    _history = []
     offsetPx = 0
   }
 
@@ -79,40 +76,61 @@ Item {
     return 20 * Math.log(Math.max(p, 1e-5)) / Math.LN10
   }
 
-  // Mastered music moves only a few dB from one moment to the next, so mapping
-  // level onto height directly gives a wall of near-identical bars. Instead this
-  // measures how far the envelope sits from its own recent average, relative to
-  // how much it has been moving lately, and eases that through tanh around the
-  // middle. The meter undulates the same whether the source is loud, quiet,
-  // compressed or dynamic, and never flattens against the top.
-  //
-  // Tuned against real peak levels recorded from an AirPlay stream, with one bar
-  // every 1/12 s. The bar length now depends on scale and refresh rate, so each
-  // rate is converted to what gives the same time constant at the actual length.
+  // Tuned against a recording of real AirPlay music, with vocal-band energy as
+  // the reference for what the meter should follow, at one bar every 1/12 s.
+  // The bar length depends on scale and refresh rate, so rates and the history
+  // length are converted to give the same time constants at the actual length.
   function rate(perReferenceBar) {
     return 1 - Math.pow(1 - perReferenceBar, barSeconds / (5 / 60))
   }
 
-  function levelFor(channel, peak) {
-    var x = toDb(peak)
-    var st = _state[channel]
-    if (x < silenceDb) {
-      _state[channel] = null
-      return 0
-    }
-    if (st === null) st = { e: x, m: x, s: 1.2 }
-    st.e += (x - st.e) * rate(x > st.e ? 0.9 : 0.45)
-    st.m += (st.e - st.m) * rate(0.03)
-    st.s += (Math.abs(st.e - st.m) - st.s) * rate(0.08)
-    _state[channel] = st
-    var z = (st.e - st.m) / (1.4 * Math.max(st.s, 0.6))
-    return 0.52 + 0.44 * Math.tanh(z)
+  property var _envelope: null
+  property var _history: []
+
+  function percentile(sorted, pct) {
+    var i = (sorted.length - 1) * pct / 100
+    var lo = Math.floor(i), hi = Math.ceil(i)
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo)
   }
 
-  function push(l, r) {
-    var nl = leftLevels.slice(1);  nl.push(levelFor(0, l))
-    var nr = rightLevels.slice(1); nr.push(levelFor(1, r))
-    leftLevels = nl; rightLevels = nr
+  // Height is the level placed within this song's own recent range: the 10th
+  // to 95th percentile of the last twenty seconds. A quieter verse sits lower
+  // than the chorus and a vocal that swells rises with it, which a measure of
+  // change against a short average cannot show -- it re-centres on each new
+  // level within a couple of seconds and flattens exactly those shifts.
+  //
+  // Percentiles rather than extremes, so one loud hit cannot pin the scale. A
+  // three dB minimum span, so a heavily limited master still moves instead of
+  // drawing a wall. Silence clears the range: each song is judged on its own.
+  //
+  // The bottom of the range sits at a quarter height, not at rest, and anything
+  // quieter compresses into the space below it, so a soft passage still ripples.
+  // Only silence rests.
+  function levelFor(peak) {
+    var x = toDb(peak)
+    if (x < silenceDb) {
+      _envelope = null
+      _history = []
+      return 0
+    }
+    _envelope = _envelope === null ? x : _envelope + (x - _envelope) * (x > _envelope ? 1 : rate(0.5))
+    var keep = Math.max(24, Math.round(20 / barSeconds))
+    var h = _history
+    h.push(_envelope)
+    if (h.length > keep) h.splice(0, h.length - keep)
+    var sorted = h.slice().sort(function(a, b) { return a - b })
+    var lo = percentile(sorted, 10), hi = percentile(sorted, 95)
+    var span = Math.max(hi - lo, 3)
+    var centre = (hi + lo) / 2
+    var t = (_envelope - (centre - span / 2)) / span
+    var v = t >= 0 ? 0.25 + 0.7 * Math.min(1, t) : 0.25 + 0.15 * Math.max(-1, t)
+    return Math.max(0.08, v)
+  }
+
+  function push(level) {
+    var next = levels.slice(1)
+    next.push(levelFor(level))
+    levels = next
   }
 
   // The high swings glow in the accent itself: lighter on a dark theme, deeper
@@ -154,8 +172,9 @@ Item {
 
       Item {
         id: slot
-        readonly property real lv: root.leftLevels[index] || 0
-        readonly property real rv: root.rightLevels[index] || 0
+        readonly property real v: root.levels[index] || 0
+        readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * v))
+        readonly property color colour: root.colourFor(v)
 
         x: (index * root.pitchPx - root.offsetPx) / root.dpr
         width: root.barPx / root.dpr
@@ -165,21 +184,19 @@ Item {
         readonly property real corner: Style.cornerRadius > 0 ? width / 2 : 0
 
         Rectangle {
-          readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * slot.lv))
           width: parent.width
-          height: px / root.dpr
-          y: (root.halfPx - px) / root.dpr
+          height: slot.px / root.dpr
+          y: (root.halfPx - slot.px) / root.dpr
           radius: Math.min(slot.corner, height / 2)
-          color: root.colourFor(slot.lv)
+          color: slot.colour
         }
 
         Rectangle {
-          readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * slot.rv))
           width: parent.width
-          height: px / root.dpr
+          height: slot.px / root.dpr
           y: (root.halfPx + root.centrePx) / root.dpr
           radius: Math.min(slot.corner, height / 2)
-          color: root.colourFor(slot.rv)
+          color: slot.colour
         }
       }
     }
