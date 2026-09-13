@@ -14,14 +14,19 @@ Item {
   property color muted: Color.muted
 
   readonly property int tickMs: 40
-  readonly property int barCount: 60
-  readonly property real gap: Math.max(1, Style.space(2))
-  readonly property real pitch: (width + gap) / barCount
-  readonly property real barWidth: Math.max(1, pitch - gap)
-  readonly property real centreGap: Math.max(1, Style.space(2))
-  readonly property real halfHeight: Math.max(1, (height - centreGap) / 2)
+  // Whole pixels throughout. With a fractional pitch each bar straddles the
+  // pixel grid differently, some rendering a pixel wider than their
+  // neighbours, and because the scroll replays the same sweep every tick those
+  // wider bars form light bands that stand still while the waveform moves.
+  readonly property int barWidth: Math.max(2, Style.space(3))
+  readonly property int gap: Math.max(1, Style.space(2))
+  readonly property int pitch: barWidth + gap
+  readonly property int barCount: Math.max(1, Math.floor((width + gap) / pitch))
+  readonly property int rowWidth: barCount * pitch - gap
+  readonly property int centreGap: Math.max(1, Style.space(2))
+  readonly property int halfHeight: Math.max(1, Math.floor((height - centreGap) / 2))
   // Quiet bars keep a sliver, so the meter reads as a meter at rest.
-  readonly property real restHeight: Math.max(1, Style.space(2))
+  readonly property int restHeight: Math.max(1, Style.space(2))
 
   implicitHeight: Style.space(44)
 
@@ -30,6 +35,8 @@ Item {
   property var rightLevels: blank()
   property var punches: blank()
   property real phase: 0
+
+  onBarCountChanged: reset()
 
   function blank() {
     var a = []
@@ -118,39 +125,46 @@ Item {
     duration: root.tickMs
   }
 
-  clip: true
+  // The row is centred in whatever width is left over, and clipped to itself so
+  // bars scrolling in and out do not show in the margins.
+  Item {
+    x: Math.floor((root.width - root.rowWidth) / 2)
+    width: root.rowWidth
+    height: root.height
+    clip: true
 
-  Repeater {
-    model: root.barCount + 1
+    Repeater {
+      model: root.barCount + 1
 
-    Item {
-      id: slot
-      readonly property real lv: root.leftLevels[index] || 0
-      readonly property real rv: root.rightLevels[index] || 0
-      readonly property real pv: root.punches[index] || 0
-      readonly property real age: index / root.barCount
+      Item {
+        id: slot
+        readonly property real lv: root.leftLevels[index] || 0
+        readonly property real rv: root.rightLevels[index] || 0
+        readonly property real pv: root.punches[index] || 0
+        readonly property real age: index / root.barCount
 
-      x: (index - 1 + root.phase) * root.pitch
-      width: root.barWidth
-      height: root.height
-      opacity: 0.4 + 0.6 * age
+        x: Math.round((index - 1 + root.phase) * root.pitch)
+        width: root.barWidth
+        height: root.height
+        opacity: 0.4 + 0.6 * age
 
-      readonly property real corner: Style.cornerRadius > 0 ? width / 2 : 0
+        readonly property real corner: Style.cornerRadius > 0 ? width / 2 : 0
 
-      Rectangle {
-        width: parent.width
-        height: Math.max(root.restHeight, root.halfHeight * slot.lv)
-        y: root.halfHeight - height
-        radius: Math.min(slot.corner, height / 2)
-        color: root.colourFor(slot.lv, slot.pv)
-      }
+        Rectangle {
+          width: parent.width
+          height: Math.max(root.restHeight, Math.round(root.halfHeight * slot.lv))
+          y: root.halfHeight - height
+          radius: Math.min(slot.corner, height / 2)
+          color: root.colourFor(slot.lv, slot.pv)
+        }
 
-      Rectangle {
-        width: parent.width
-        height: Math.max(root.restHeight, root.halfHeight * slot.rv)
-        y: root.halfHeight + root.centreGap
-        radius: Math.min(slot.corner, height / 2)
-        color: root.colourFor(slot.rv, slot.pv)
+        Rectangle {
+          width: parent.width
+          height: Math.max(root.restHeight, Math.round(root.halfHeight * slot.rv))
+          y: root.halfHeight + root.centreGap
+          radius: Math.min(slot.corner, height / 2)
+          color: root.colourFor(slot.rv, slot.pv)
+        }
       }
     }
   }
