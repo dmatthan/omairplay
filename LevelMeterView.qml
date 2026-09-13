@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import qs.Commons
 
 // Stereo level history: left channel above the centre line, right below,
@@ -17,31 +18,45 @@ Item {
 
   signal sampleNeeded()
 
-  // Whole pixels throughout. With a fractional pitch each bar straddles the
-  // pixel grid differently, and the wider ones form light bands that stand
-  // still while the waveform moves.
-  readonly property int barWidth: Math.max(2, Style.space(3))
-  readonly property int gap: Math.max(1, Style.space(2))
-  readonly property int pitch: barWidth + gap
-  readonly property int barCount: Math.max(1, Math.floor((width + gap) / pitch))
-  readonly property int rowWidth: barCount * pitch - gap
-  readonly property int centreGap: Math.max(1, Style.space(2))
-  readonly property int halfHeight: Math.max(1, Math.floor((height - centreGap) / 2))
-  readonly property int restHeight: Math.max(1, Style.space(2))
+  // Geometry is worked out in physical pixels, then divided back into logical
+  // ones. Anything fractional in physical pixels -- which fractional monitor
+  // scaling and the shell's UI scale both produce -- makes bars straddle the
+  // pixel grid unevenly: wider ones form light bands, and a scroll that moves a
+  // non-whole number of pixels shimmers as every bar's antialiasing changes
+  // from frame to frame.
+  readonly property real dpr: Math.max(1, Screen.devicePixelRatio)
+  readonly property int barPx: Math.max(2, Math.round(Style.space(3) * dpr))
+  readonly property int gapPx: Math.max(1, Math.round(Style.space(2) * dpr))
+  readonly property int pitchPx: barPx + gapPx
+  readonly property int barCount: Math.max(1, Math.floor((width * dpr + gapPx) / pitchPx))
+  readonly property int rowPx: barCount * pitchPx - gapPx
+  readonly property int centrePx: Math.max(1, Math.round(Style.space(2) * dpr))
+  readonly property int halfPx: Math.max(1, Math.floor((height * dpr - centrePx) / 2))
+  readonly property int restPx: Math.max(1, Math.round(Style.space(2) * dpr))
 
-  // One bar every 5 frames at 60 Hz: exactly one pixel of scroll per frame.
-  // Faster than about half a bar's pitch per frame and the regular pattern of
-  // bars strobes, because the eye can no longer tell which way it is moving.
-  readonly property real barMs: 1000 * 5 / 60
-  readonly property real speed: pitch / (barMs / 1000)
+  // Motion: a whole number of physical pixels, on a whole number of frames.
+  // Roughly a pixel per frame at 60 Hz; on a faster display the same step is
+  // taken every second or third frame, and on a dense display the step is
+  // larger, so the speed stays near 60 physical pixels a second everywhere and
+  // every move is identical. Anything much faster than half a bar's pitch per
+  // step and the regular pattern of bars strobes.
+  readonly property int stepPx: Math.max(1, Math.round(dpr))
+  property real _frameSeconds: 1 / 60
+  // 60 and 75 Hz step every frame, 120 and 144 Hz every second, 165 and above
+  // every third. Biased so the switch falls between common refresh rates rather
+  // than on one, where a jittery estimate would flip it back and forth.
+  readonly property int frameStride: Math.max(1, Math.floor((1 / _frameSeconds) / 60 + 0.25))
+  readonly property real barSeconds: pitchPx / stepPx * frameStride * _frameSeconds
 
   implicitHeight: Style.space(44)
 
   property var leftLevels: blank()
   property var rightLevels: blank()
-  property real offset: 0
+  property int offsetPx: 0
+  property int _frames: 0
 
   onBarCountChanged: reset()
+  onPitchPxChanged: reset()
 
   function blank() {
     var a = []
@@ -57,7 +72,7 @@ Item {
   function reset() {
     leftLevels = blank(); rightLevels = blank()
     _state = [null, null]
-    offset = 0
+    offsetPx = 0
   }
 
   function toDb(p) {
@@ -71,8 +86,13 @@ Item {
   // middle. The meter undulates the same whether the source is loud, quiet,
   // compressed or dynamic, and never flattens against the top.
   //
-  // Tuned against real peak levels recorded from an AirPlay stream, at this bar
-  // rate: rates below are per bar.
+  // Tuned against real peak levels recorded from an AirPlay stream, with one bar
+  // every 1/12 s. The bar length now depends on scale and refresh rate, so each
+  // rate is converted to what gives the same time constant at the actual length.
+  function rate(perReferenceBar) {
+    return 1 - Math.pow(1 - perReferenceBar, barSeconds / (5 / 60))
+  }
+
   function levelFor(channel, peak) {
     var x = toDb(peak)
     var st = _state[channel]
@@ -81,9 +101,9 @@ Item {
       return 0
     }
     if (st === null) st = { e: x, m: x, s: 1.2 }
-    st.e += (x - st.e) * (x > st.e ? 0.9 : 0.45)
-    st.m += (st.e - st.m) * 0.03
-    st.s += (Math.abs(st.e - st.m) - st.s) * 0.08
+    st.e += (x - st.e) * rate(x > st.e ? 0.9 : 0.45)
+    st.m += (st.e - st.m) * rate(0.03)
+    st.s += (Math.abs(st.e - st.m) - st.s) * rate(0.08)
     _state[channel] = st
     var z = (st.e - st.m) / (1.4 * Math.max(st.s, 0.6))
     return 0.52 + 0.44 * Math.tanh(z)
@@ -106,33 +126,26 @@ Item {
     return g > 0 ? Qt.tint(c, Qt.rgba(glow.r, glow.g, glow.b, 0.75 * g)) : c
   }
 
-  // Driven by the frame clock rather than a timer, so the scroll advances the
-  // same distance every frame and asks for a sample exactly when it has moved
-  // one bar.
-  //
-  // Frame times jitter around the refresh interval, so a raw advance of
-  // speed * frameTime lands just short of a whole pixel now and then and the
-  // scroll stalls for a frame. Where the smoothed advance is within a whisker of
-  // a whole pixel -- exactly one at 60 Hz -- it is taken as that, and the row
-  // moves the same distance every frame.
-  property real _frameSeconds: 1 / 60
+  // Driven by the frame clock rather than a timer, counting frames rather than
+  // accumulating time, so every step is the same size and lands on the same
+  // cadence. Frame time is only used to learn the refresh rate.
   FrameAnimation {
     running: root.running && root.barCount > 1
     onTriggered: {
-      root._frameSeconds += (Math.min(frameTime, 0.1) - root._frameSeconds) * 0.05
-      var step = root.speed * root._frameSeconds
-      if (Math.abs(step - Math.round(step)) < 0.1) step = Math.round(step)
-      root.offset += step
-      while (root.offset >= root.pitch) {
-        root.offset -= root.pitch
+      root._frameSeconds += (Math.min(Math.max(frameTime, 1 / 500), 0.1) - root._frameSeconds) * 0.05
+      if (++root._frames < root.frameStride) return
+      root._frames = 0
+      root.offsetPx += root.stepPx
+      while (root.offsetPx >= root.pitchPx) {
+        root.offsetPx -= root.pitchPx
         root.sampleNeeded()
       }
     }
   }
 
   Item {
-    x: Math.floor((root.width - root.rowWidth) / 2)
-    width: root.rowWidth
+    x: Math.floor((root.width * root.dpr - root.rowPx) / 2) / root.dpr
+    width: root.rowPx / root.dpr
     height: root.height
     clip: true
 
@@ -144,25 +157,27 @@ Item {
         readonly property real lv: root.leftLevels[index] || 0
         readonly property real rv: root.rightLevels[index] || 0
 
-        x: index * root.pitch - Math.round(root.offset)
-        width: root.barWidth
+        x: (index * root.pitchPx - root.offsetPx) / root.dpr
+        width: root.barPx / root.dpr
         height: root.height
         opacity: 0.4 + 0.6 * (index / root.barCount)
 
         readonly property real corner: Style.cornerRadius > 0 ? width / 2 : 0
 
         Rectangle {
+          readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * slot.lv))
           width: parent.width
-          height: Math.max(root.restHeight, Math.round(root.halfHeight * slot.lv))
-          y: root.halfHeight - height
+          height: px / root.dpr
+          y: (root.halfPx - px) / root.dpr
           radius: Math.min(slot.corner, height / 2)
           color: root.colourFor(slot.lv)
         }
 
         Rectangle {
+          readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * slot.rv))
           width: parent.width
-          height: Math.max(root.restHeight, Math.round(root.halfHeight * slot.rv))
-          y: root.halfHeight + root.centreGap
+          height: px / root.dpr
+          y: (root.halfPx + root.centrePx) / root.dpr
           radius: Math.min(slot.corner, height / 2)
           color: root.colourFor(slot.rv)
         }
