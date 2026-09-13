@@ -127,11 +127,27 @@ Panel {
       case "setup":    svc.runSetup(true); root.close(); break
       case "power":    svc.toggle(); break
       case "login":    svc.setStartAtLogin(!svc.startAtLogin); break
-      case "name":     nameField.forceActiveFocus(); break
+      case "name":     nameField.forceActiveFocus(); nameField.selectAll(); break
       case "restart":  svc.restart(); break
       case "firewall": svc.runSetup(true); root.close(); break
       case "remove":   removeConfirm.opened = true; break
     }
+  }
+
+  // Hand the keyboard back to the panel. The key catcher is blocked while the
+  // field has focus, so without this j/k keep typing into the field after
+  // Enter, and the rename confirmation cannot be answered from the keyboard.
+  function leaveNameField() {
+    var i = rows.indexOf("name")
+    if (i >= 0) cursorIndex = i
+    cursorActive = true
+    keyCatcher.forceActiveFocus()
+  }
+
+  function revertName() {
+    var current = svc ? (svc.advertisedName || svc.speakerName) : ""
+    nameDraft = current
+    nameField.text = current
   }
 
   // Changing the name rewrites the config, and the receiver only reads its
@@ -589,7 +605,16 @@ Panel {
               // stop at the limit rather than silently truncating later.
               maximumLength: 50
               onTextChanged: root.nameDraft = text
-              onAccepted: root.submitName()
+              onAccepted: { root.leaveNameField(); root.submitName() }
+              Keys.onEscapePressed: function(event) {
+                root.revertName(); root.leaveNameField(); event.accepted = true
+              }
+              Keys.onUpPressed: function(event) {
+                root.leaveNameField(); root.moveCursor(-1); event.accepted = true
+              }
+              Keys.onDownPressed: function(event) {
+                root.leaveNameField(); root.moveCursor(1); event.accepted = true
+              }
             }
 
             Text {
@@ -598,8 +623,8 @@ Panel {
               visible: root.svc !== null && root.nameDraft.trim() !== ""
                        && root.nameDraft.trim() !== root.svc.advertisedName
               text: root.svc && root.svc.playing
-                ? "Press Enter to rename. Something is playing, so this will interrupt it."
-                : "Press Enter to rename."
+                ? "Enter to rename, Esc to cancel. Something is playing, so this will interrupt it."
+                : "Enter to rename, Esc to cancel."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
