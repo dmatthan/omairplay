@@ -605,7 +605,16 @@ Panel {
               // stop at the limit rather than silently truncating later.
               maximumLength: 50
               onTextChanged: root.nameDraft = text
-              onAccepted: { root.leaveNameField(); root.submitName() }
+              // Handled here and accepted, not in onAccepted: TextInput passes
+              // Return on to its parents after emitting accepted, and once focus
+              // has moved the panel would take that same press as confirming
+              // the rename dialog it just opened.
+              Keys.onReturnPressed: function(event) {
+                event.accepted = true; root.leaveNameField(); root.submitName()
+              }
+              Keys.onEnterPressed: function(event) {
+                event.accepted = true; root.leaveNameField(); root.submitName()
+              }
               Keys.onEscapePressed: function(event) {
                 root.revertName(); root.leaveNameField(); event.accepted = true
               }
