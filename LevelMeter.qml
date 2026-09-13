@@ -86,13 +86,17 @@ Item {
     }
   }
 
-  Timer {
-    interval: view.tickMs
-    repeat: true
+  onLiveChanged: if (!live) view.reset()
+
+  LevelMeterView {
+    id: view
+    anchors.fill: parent
     running: root.live
-    onTriggered: {
-      // No report since the last tick: repeat the last values rather than
-      // drawing a gap that was never in the audio.
+    foreground: root.foreground
+    accent: root.accent
+    // No report since the last bar: repeat the last values rather than draw a
+    // gap that was never in the audio.
+    onSampleNeeded: {
       if (root._fresh) {
         root._lastLeft = root._left
         root._lastRight = root._right
@@ -102,14 +106,5 @@ Item {
       root._right = 0
       root._fresh = false
     }
-  }
-
-  onLiveChanged: if (!live) view.reset()
-
-  LevelMeterView {
-    id: view
-    anchors.fill: parent
-    foreground: root.foreground
-    accent: root.accent
   }
 }

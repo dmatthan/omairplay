@@ -1,8 +1,9 @@
 import QtQuick
 import qs.Commons
 
-// Stereo level history: left channel above the centre line, right channel
-// below, newest on the right. Feed it with push(left, right) once per tick.
+// Stereo level history: left channel above the centre line, right below,
+// newest on the right. Asks for a sample through sampleNeeded() whenever it has
+// scrolled one bar, and draws what push(left, right) gives it.
 //
 // Amplitude only. There is no frequency data to draw a spectrum from, so this
 // shows what the peaks are actually doing rather than inventing bands.
@@ -12,12 +13,13 @@ Item {
   property color foreground: Color.foreground
   property color accent: Color.accent
   property color muted: Color.muted
+  property bool running: false
 
-  readonly property int tickMs: 40
+  signal sampleNeeded()
+
   // Whole pixels throughout. With a fractional pitch each bar straddles the
-  // pixel grid differently, some rendering a pixel wider than their
-  // neighbours, and because the scroll replays the same sweep every tick those
-  // wider bars form light bands that stand still while the waveform moves.
+  // pixel grid differently, and the wider ones form light bands that stand
+  // still while the waveform moves.
   readonly property int barWidth: Math.max(2, Style.space(3))
   readonly property int gap: Math.max(1, Style.space(2))
   readonly property int pitch: barWidth + gap
@@ -25,16 +27,19 @@ Item {
   readonly property int rowWidth: barCount * pitch - gap
   readonly property int centreGap: Math.max(1, Style.space(2))
   readonly property int halfHeight: Math.max(1, Math.floor((height - centreGap) / 2))
-  // Quiet bars keep a sliver, so the meter reads as a meter at rest.
   readonly property int restHeight: Math.max(1, Style.space(2))
+
+  // One bar every 5 frames at 60 Hz: exactly one pixel of scroll per frame.
+  // Faster than about half a bar's pitch per frame and the regular pattern of
+  // bars strobes, because the eye can no longer tell which way it is moving.
+  readonly property real barMs: 1000 * 5 / 60
+  readonly property real speed: pitch / (barMs / 1000)
 
   implicitHeight: Style.space(44)
 
-  // One more slot than is visible, so the scroll has something to reveal.
   property var leftLevels: blank()
   property var rightLevels: blank()
-  property var punches: blank()
-  property real phase: 0
+  property real offset: 0
 
   onBarCountChanged: reset()
 
@@ -44,89 +49,87 @@ Item {
     return a
   }
 
-  // Auto-ranging, in dB. The display maps [floor, ceiling] onto the full
-  // height, so the picture is the same at any sending-device volume, and the
-  // few dB music normally moves through fill the space instead of sitting in
-  // a band near the top.
-  property real _ceiling: -90
-  property real _floor: -90
-  property real _average: -90
-  readonly property real minSpanDb: 10
+  // Per channel: a smoothed envelope in dB, its recent average, and how much it
+  // has recently been moving.
+  property var _state: [null, null]
   readonly property real silenceDb: -54
 
   function reset() {
-    leftLevels = blank(); rightLevels = blank(); punches = blank()
-    _ceiling = -90; _floor = -90; _average = -90
+    leftLevels = blank(); rightLevels = blank()
+    _state = [null, null]
+    offset = 0
   }
 
   function toDb(p) {
     return 20 * Math.log(Math.max(p, 1e-5)) / Math.LN10
   }
 
-  function push(l, r) {
-    var dl = toDb(l), dr = toDb(r)
-    var d = Math.max(dl, dr)
-
-    if (_ceiling < silenceDb && d >= silenceDb) {
-      // Coming out of silence: start from a sensible range rather than
-      // spending seconds climbing out of the old one.
-      _floor = d - minSpanDb * 1.4
-      _average = d
+  // Mastered music moves only a few dB from one moment to the next, so mapping
+  // level onto height directly gives a wall of near-identical bars. Instead this
+  // measures how far the envelope sits from its own recent average, relative to
+  // how much it has been moving lately, and eases that through tanh around the
+  // middle. The meter undulates the same whether the source is loud, quiet,
+  // compressed or dynamic, and never flattens against the top.
+  //
+  // Tuned against real peak levels recorded from an AirPlay stream, at this bar
+  // rate: rates below are per bar.
+  function levelFor(channel, peak) {
+    var x = toDb(peak)
+    var st = _state[channel]
+    if (x < silenceDb) {
+      _state[channel] = null
+      return 0
     }
-    // Ceiling jumps with a louder peak and eases back about 5 dB a second.
-    _ceiling = Math.max(d, _ceiling - 0.2)
-    // Floor follows the quieter moments: drops quickly, rises slowly.
-    _floor += (d - _floor) * (d < _floor ? 0.3 : 0.015)
-
-    var lo = Math.min(_floor, _ceiling - minSpanDb)
-    var span = _ceiling - lo
-    var silent = _ceiling < silenceDb
-
-    // How far this moment stands above the recent average: beats, mostly.
-    var onset = silent ? 0 : Math.max(0, Math.min(1, (d - _average) / 6))
-    _average += (d - _average) * 0.1
-
-    function level(x) {
-      if (silent) return 0
-      var t = (x - lo) / span
-      if (t <= 0) return 0
-      if (t >= 1) return 1
-      return Math.pow(t, 1.15)
-    }
-
-    var lift = onset * 0.22
-    var nl = leftLevels.slice(1);  nl.push(Math.min(1, level(dl) + lift))
-    var nr = rightLevels.slice(1); nr.push(Math.min(1, level(dr) + lift))
-    var np = punches.slice(1); np.push(onset)
-    leftLevels = nl; rightLevels = nr; punches = np
-
-    scroll.restart()
+    if (st === null) st = { e: x, m: x, s: 1.2 }
+    st.e += (x - st.e) * (x > st.e ? 0.9 : 0.45)
+    st.m += (st.e - st.m) * 0.03
+    st.s += (Math.abs(st.e - st.m) - st.s) * 0.08
+    _state[channel] = st
+    var z = (st.e - st.m) / (1.4 * Math.max(st.s, 0.6))
+    return 0.52 + 0.44 * Math.tanh(z)
   }
 
-  // Beats glow in the accent itself -- lighter on a dark theme, deeper on a light
-  // one -- rather than towards the foreground, whose hue often differs.
+  function push(l, r) {
+    var nl = leftLevels.slice(1);  nl.push(levelFor(0, l))
+    var nr = rightLevels.slice(1); nr.push(levelFor(1, r))
+    leftLevels = nl; rightLevels = nr
+  }
+
+  // The high swings glow in the accent itself: lighter on a dark theme, deeper
+  // on a light one.
   readonly property color glow: foreground.hslLightness < 0.5
     ? Qt.darker(accent, 1.6) : Qt.lighter(accent, 1.45)
 
-  function colourFor(v, p) {
+  function colourFor(v) {
     var c = Qt.tint(muted, Qt.rgba(accent.r, accent.g, accent.b, 0.45 + 0.55 * v))
-    return p > 0 ? Qt.tint(c, Qt.rgba(glow.r, glow.g, glow.b, 0.85 * p)) : c
+    var g = Math.max(0, Math.min(1, (v - 0.72) / 0.24))
+    return g > 0 ? Qt.tint(c, Qt.rgba(glow.r, glow.g, glow.b, 0.75 * g)) : c
   }
 
-  // Each push shifts every value one slot left; starting the row one pitch to
-  // the right and sliding it back over the tick turns that into a continuous
-  // scroll instead of a step.
-  NumberAnimation {
-    id: scroll
-    target: root
-    property: "phase"
-    from: 1
-    to: 0
-    duration: root.tickMs
+  // Driven by the frame clock rather than a timer, so the scroll advances the
+  // same distance every frame and asks for a sample exactly when it has moved
+  // one bar.
+  //
+  // Frame times jitter around the refresh interval, so a raw advance of
+  // speed * frameTime lands just short of a whole pixel now and then and the
+  // scroll stalls for a frame. Where the smoothed advance is within a whisker of
+  // a whole pixel -- exactly one at 60 Hz -- it is taken as that, and the row
+  // moves the same distance every frame.
+  property real _frameSeconds: 1 / 60
+  FrameAnimation {
+    running: root.running && root.barCount > 1
+    onTriggered: {
+      root._frameSeconds += (Math.min(frameTime, 0.1) - root._frameSeconds) * 0.05
+      var step = root.speed * root._frameSeconds
+      if (Math.abs(step - Math.round(step)) < 0.1) step = Math.round(step)
+      root.offset += step
+      while (root.offset >= root.pitch) {
+        root.offset -= root.pitch
+        root.sampleNeeded()
+      }
+    }
   }
 
-  // The row is centred in whatever width is left over, and clipped to itself so
-  // bars scrolling in and out do not show in the margins.
   Item {
     x: Math.floor((root.width - root.rowWidth) / 2)
     width: root.rowWidth
@@ -140,13 +143,11 @@ Item {
         id: slot
         readonly property real lv: root.leftLevels[index] || 0
         readonly property real rv: root.rightLevels[index] || 0
-        readonly property real pv: root.punches[index] || 0
-        readonly property real age: index / root.barCount
 
-        x: Math.round((index - 1 + root.phase) * root.pitch)
+        x: index * root.pitch - Math.round(root.offset)
         width: root.barWidth
         height: root.height
-        opacity: 0.4 + 0.6 * age
+        opacity: 0.4 + 0.6 * (index / root.barCount)
 
         readonly property real corner: Style.cornerRadius > 0 ? width / 2 : 0
 
@@ -155,7 +156,7 @@ Item {
           height: Math.max(root.restHeight, Math.round(root.halfHeight * slot.lv))
           y: root.halfHeight - height
           radius: Math.min(slot.corner, height / 2)
-          color: root.colourFor(slot.lv, slot.pv)
+          color: root.colourFor(slot.lv)
         }
 
         Rectangle {
@@ -163,7 +164,7 @@ Item {
           height: Math.max(root.restHeight, Math.round(root.halfHeight * slot.rv))
           y: root.halfHeight + root.centreGap
           radius: Math.min(slot.corner, height / 2)
-          color: root.colourFor(slot.rv, slot.pv)
+          color: root.colourFor(slot.rv)
         }
       }
     }
