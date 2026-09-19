@@ -1,0 +1,148 @@
+#!/bin/bash
+# Revert the AirPlay receiver and set it up again, in one terminal.
+#
+# This is what the popup's Repair button runs. Both halves run as the user, in
+# this terminal; only the privileged commands inside them use sudo, at absolute
+# paths under /usr/bin, so nothing here is ever executed as root. sudo caches
+# credentials per tty, so the first prompt covers the whole repair in the
+# common case. A slow install can outlive that cache and prompt again; that is
+# correct behaviour, and not something to tune in sudoers.
+#
+# Removal runs first so setup starts from a clean slate: the config, the unit,
+# the firewall rules and the state directory are all rebuilt.
+#
+# The unit is put back the way it was afterwards. Removal disables it and setup
+# does not re-enable it, so without that step Repair would silently turn off
+# "Start at login" and leave a receiver that was running sitting off.
+#
+# Usage: airplay-repair [--dry-run]
+
+set -uo pipefail
+
+# Re-exec once with a closed environment.
+#
+# Pinning PATH was not enough. bash reads BASH_ENV for every non-interactive
+# script and sources it before the first line here runs, so a hostile value
+# executes arbitrary code in this shell -- including defining a function named
+# `sudo`, which would then shadow the real command in the privileged steps.
+# Unsetting it here cannot help: by then it has already been sourced. The only
+# fix is to start again in an environment we built ourselves.
+#
+# env -i drops everything; what follows is the complete allowlist. It closes
+# BASH_ENV and ENV (shell), PYTHONPATH and PYTHONHOME (our python3 helpers),
+# LD_PRELOAD and friends (every dynamically linked binary), and CDPATH, IFS and
+# GLOBIGNORE (word splitting and `cd`).
+#
+# The gate is a leading argument, not an environment variable: anything able to
+# set a variable could otherwise set the marker and skip the re-exec.
+#
+# HOME comes from the passwd database rather than the environment. The systemd
+# unit resolves its paths with %h, which is the passwd home, so taking it from
+# anywhere else let the two disagree -- a user with XDG_CONFIG_HOME set had the
+# config written where the receiver would never read it. XDG_* is deliberately
+# not carried through, so every path is the one the README documents.
+#
+# OMARCHY_PATH is set to the value the omarchy package itself hardcodes rather
+# than inherited, for the same reason PATH is not inherited.
+if [[ ${1:-} != --omairplay-sealed-env ]]; then
+  _oa_user="$(/usr/bin/id -un)"
+  _oa_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | /usr/bin/cut -d: -f6)"
+  _oa_env=(
+    PATH=/usr/bin
+    OMARCHY_PATH=/usr/share/omarchy
+    LC_ALL=C
+    "HOME=$_oa_home"
+    "USER=$_oa_user"
+    "LOGNAME=$_oa_user"
+  )
+  # Needed by `systemctl --user` and by pactl to find the audio socket.
+  if [[ -n ${XDG_RUNTIME_DIR:-} ]]; then
+    _oa_env+=( "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" )
+  fi
+  if [[ -n ${DBUS_SESSION_BUS_ADDRESS:-} ]]; then
+    _oa_env+=( "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" )
+  fi
+  # Only so the setup and removal terminals render correctly.
+  if [[ -n ${TERM:-} ]]; then
+    _oa_env+=( "TERM=$TERM" )
+  fi
+  exec /usr/bin/env -i "${_oa_env[@]}" /usr/bin/bash "$0" --omairplay-sealed-env "$@"
+fi
+shift
+
+
+DRY_RUN="no"
+while (( $# )); do
+  case "$1" in
+    --dry-run) DRY_RUN="yes"; shift ;;
+    *) echo "airplay-repair: unknown argument '$1'" >&2; exit 2 ;;
+  esac
+done
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+UNIT="omarchy-airplay.service"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+
+bold "Repairing the AirPlay receiver"
+echo
+
+# How the unit was, read before anything touches it, so the restore step can
+# put it back. `activating` does not count as running, matching Service.qml.
+WAS_ENABLED=no
+WAS_ACTIVE=no
+[[ "$(systemctl --user is-enabled "$UNIT" 2>/dev/null)" == "enabled" ]] && WAS_ENABLED=yes
+[[ "$(systemctl --user is-active "$UNIT" 2>/dev/null)" == "active" ]] && WAS_ACTIVE=yes
+
+REMOVE_ARGS=(--system)
+SETUP_ARGS=(--wide)
+if [[ $DRY_RUN == yes ]]; then
+  REMOVE_ARGS+=(--dry-run)
+  SETUP_ARGS+=(--dry-run)
+fi
+
+# 1. Undo everything, so setup is not re-applying over unknown state. The
+# uninstaller records anything it could not finish and exits non-zero; stop
+# rather than reinstall on top of that.
+if ! "$HERE/airplay-remove" "${REMOVE_ARGS[@]}"; then
+  echo
+  bold "Repair stopped: the removal did not finish."
+  echo "The receiver was not re-applied. Fix the removal first, then run Repair again."
+  exit 1
+fi
+
+echo
+# 2. Re-apply from scratch.
+if ! "$HERE/airplay-setup" "${SETUP_ARGS[@]}"; then
+  echo
+  bold "Repair stopped: the setup did not finish."
+  echo "Run Repair again to retry."
+  exit 1
+fi
+
+# 3. Put the unit back the way it was.
+if [[ $DRY_RUN == yes ]]; then
+  echo
+  bold "Dry run: nothing was changed."
+  echo "Would restore: enabled=$WAS_ENABLED, running=$WAS_ACTIVE."
+  exit 0
+fi
+
+if [[ $WAS_ENABLED == yes ]] \
+   && ! systemctl --user enable "$UNIT" >/dev/null 2>&1; then
+  echo "airplay-repair: could not re-enable start at login." >&2
+fi
+if [[ $WAS_ACTIVE == yes ]] && ! systemctl --user start "$UNIT"; then
+  echo "airplay-repair: could not start the receiver." >&2
+fi
+
+echo
+bold "Repair done."
+if [[ $WAS_ACTIVE == yes ]]; then
+  echo "The receiver was running before, so it has been started again."
+else
+  echo "The receiver was off before, so it has been left off."
+fi
+if [[ $WAS_ENABLED == yes ]]; then
+  echo "Start at login is still on."
+fi
