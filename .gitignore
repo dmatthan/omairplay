@@ -1,15 +1,3 @@
-# Internal engineering notes: the record of how this was built, what broke, and
-# why particular decisions were made. Kept out of the published repo because it
-# is written as a working log rather than documentation, and because it quotes
-# this machine's real network details, including an ISP-delegated IPv6 prefix.
-#
-# It stays on disk as an untracked file, so it survives `omarchy plugin update`.
-NOTES.md
-
-# Byte-cache Python may write next to bin/airplay-install-file if it is ever
-# imported rather than executed. Never wanted in the published plugin.
+AGENTS.md
 __pycache__/
 *.pyc
-
-# Working reference on the marketplace reviewer's standard.
-SECURITY.md
