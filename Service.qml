@@ -463,12 +463,14 @@ Item {
   // Without this the node's properties are not kept live.
   PwObjectTracker { objects: root.streamNode ? [root.streamNode] : [] }
 
-  // A few seconds of grace: the stream appears a beat after playback starts,
-  // and a false alarm would send someone to Repair for nothing.
+  // The stream appears a beat after playback starts, and MPRIS keeps claiming
+  // playing for up to shairport-sync's 10s active_state_timeout after a pause
+  // or a track ends. Waiting longer than that means neither can flash the
+  // warning; a real outage still surfaces within seconds.
   property bool audioStalled: false
   Timer {
     id: audioStallTimer
-    interval: 4000
+    interval: 12000
     repeat: false
     running: root.probed && root.setupComplete && root.effectiveRunning
              && root.playing && root.hasTrack && !root.audioStreamUp
