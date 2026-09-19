@@ -49,8 +49,8 @@ password prompt. It:
    ```
 5. Writes the receiver's config and a user service under `$HOME`.
 
-**The plugin itself never needs root while running.** Only setup and removal do,
-and both run visibly in a terminal.
+**The plugin itself never needs root while running.** Only setup, Repair and
+removal do, and each runs visibly in a terminal.
 
 The receiver runs as a user service, `omarchy-airplay.service`. A machine gets
 one AirPlay 2 receiver, so if the packaged `shairport-sync` units are enabled,
@@ -69,6 +69,7 @@ The bar icon shows the receiver's state:
 | Speaker, dimmed | Off, or not set up |
 | Speaker | Ready, waiting for a device |
 | Cast | Playing |
+| Speaker, alert colour | Needs repair — press Repair in the popup |
 
 - **Click** — open the popup
 - **Right-click** — turn the receiver on or off without opening anything
@@ -159,8 +160,8 @@ of it.
 Omarchy plugins run unsandboxed, with your user's permissions — this one
 included. What that means here:
 
-- Root is used only by setup and removal, both run visibly in a terminal so you
-  can read every command before approving it.
+- Root is used only by setup, Repair and removal, each run visibly in a terminal
+  so you can read every command before approving it.
 - Firewall rules are limited to private address ranges, never to Anywhere, and
   `ufw` is never disabled or reset. Every rule is tagged `omairplay`, and
   removal finds them by that tag.
