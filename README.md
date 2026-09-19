@@ -86,9 +86,10 @@ Control playback from your phone — it stays the player throughout.
 
 ## Settings
 
-In the popup: **speaker name** and **start at login**.
+In the popup: **speaker name**, **start at login**, and **Repair**.
 
 Renaming restarts the receiver, which interrupts playback, so it asks first.
+Repair does too.
 
 The rest are available via the bar config:
 
@@ -99,15 +100,20 @@ omarchy bar set io.github.dmatthan.omairplay refreshIntervalSec 5
 omarchy bar move io.github.dmatthan.omairplay --section right
 ```
 
-## If your phone sees the speaker but won't connect
+## If the speaker appears but won't play
 
-Check the firewall. mDNS discovery reaches you through `ufw` on its own, so the
-speaker can appear on your phone while the connection is still blocked. The
-same cause shows up as a track that displays but plays nothing, when only the
-audio channels are blocked, and after your router hands out a new IPv6 prefix.
+Open the popup. OmairPlay reads the live `ufw` rules and the receiver's own
+health, and says so when something is wrong — missing rules, a new IPv6 prefix,
+a firewall that is ignoring IPv6, `nqptp` not running, or a track that is
+showing while no audio is arriving.
 
-OmairPlay reads the live `ufw` rules and says so in the popup, with a button to
-re-run setup, which picks up your current addresses.
+**Repair** fixes all of them. It reverts the receiver's setup and redoes it for
+the addresses your machine has now, in one terminal, so it prompts once for your
+password. It briefly stops the receiver, so it interrupts playback, and it puts
+the receiver back the way it was — on, off, and whether it starts at login.
+
+The old workaround, **Remove receiver** followed by setting it up again, still
+works, but Repair is what it was doing, minus the guessing.
 
 ## Removing it
 
