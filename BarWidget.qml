@@ -70,22 +70,21 @@ Panel {
     }
   }
 
-  readonly property color barIconColor: {
-    if (receiverState === "failed") return root.urgent
-    if (receiverState === "playing" || receiverState === "idle") return barForeground
-    return Qt.darker(barForeground, 1.55)
-  }
-
   readonly property string tooltipText: {
     if (!svc) return "AirPlay"
     if (!svc.setupComplete) return "AirPlay: not set up"
     if (svc.failed) return "AirPlay: could not start"
     if (svc.activating) return "AirPlay: starting"
     if (svc.actionLabel !== "") return "AirPlay: " + svc.actionLabel.toLowerCase()
-    if (!svc.firewallOk) return "AirPlay: needs repair"
+    // Name the reason rather than "needs repair": the tooltip is the only
+    // diagnosis there is while the popup is shut.
+    if (!svc.firewallOk)
+      return (svc.firewallMissing && svc.firewallMissing.length > 0)
+        ? "AirPlay: firewall rules missing" : "AirPlay: firewall blocked"
     if (!svc.effectiveRunning) return "AirPlay: off"
-    if (svc.clockSyncDown || svc.notListening || svc.audioStalled)
-      return "AirPlay: needs repair"
+    if (svc.clockSyncDown) return "AirPlay: clock sync service down"
+    if (svc.notListening) return "AirPlay: receiver not responding"
+    if (svc.audioStalled) return "AirPlay: no audio arriving"
     if (svc.playing && svc.hasTrack)
       return svc.artist !== "" ? (svc.title + " — " + svc.artist) : svc.title
     return "AirPlay: ready as " + svc.advertisedName
@@ -237,6 +236,12 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.icon
+    // Off, starting and not-set-up stay dim; playing and idle carry the normal
+    // colour. Failure, or anything only Repair can fix, is urgent. WidgetButton
+    // picks `activeColor` (the bar's urgent) over `foreground` when active.
+    foreground: (root.receiverState === "playing" || root.receiverState === "idle")
+      ? barForeground : Qt.darker(barForeground, 1.55)
+    active: root.svc !== null && (root.svc.failed || root.svc.needsRepair)
     // WidgetButton shows and hides the tooltip itself from this property.
     tooltipText: root.tooltipText
     onPressed: function(buttonCode) {
@@ -336,7 +341,9 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: root.icon
-                color: root.receiverState === "failed" ? root.urgent : root.foreground
+                color: (root.receiverState === "failed"
+                        || (root.svc && root.svc.needsRepair))
+                  ? root.urgent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.display
                 renderType: Text.NativeRendering
