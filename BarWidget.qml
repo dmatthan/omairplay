@@ -105,6 +105,7 @@ Panel {
     r.push("name")
     if (svc.configStale && svc.running) r.push("restart")
     if (!svc.firewallOk) r.push("firewall")
+    r.push("repair")
     r.push("remove")
     return r
   }
@@ -129,7 +130,8 @@ Panel {
       case "login":    svc.setStartAtLogin(!svc.startAtLogin); break
       case "name":     nameField.forceActiveFocus(); nameField.selectAll(); break
       case "restart":  svc.restart(); break
-      case "firewall": svc.runSetup(true); root.close(); break
+      case "firewall": root.repair(); break
+      case "repair":   root.repair(); break
       case "remove":   removeConfirm.opened = true; break
     }
   }
@@ -212,8 +214,20 @@ Panel {
     }
   }
 
+  // Reverts and reinstalls the receiver, which is the fix for the states the
+  // popup cannot repair in place -- firewall rules for an address the machine
+  // no longer has, a wedged receiver, ownership of nqptp. It restarts the
+  // receiver as part of the round trip, so ask first when something is playing.
+  function repair() {
+    if (!svc) return
+    if (svc.playing) { repairConfirm.opened = true; return }
+    svc.runRepair()
+    root.close()
+  }
+
   readonly property var openDialog: renameConfirm.opened ? renameConfirm
-    : (removeConfirm.opened ? removeConfirm : null)
+    : (repairConfirm.opened ? repairConfirm
+    : (removeConfirm.opened ? removeConfirm : null))
 
   BarIconButton {
     id: button
@@ -655,14 +669,32 @@ Panel {
               font.pixelSize: Style.font.caption
             }
 
-            Button {
+            // Repair and removal share one row, so the extra action costs no
+            // height. Repair is the front door for everything the popup cannot
+            // fix in place; removal stays the deliberate, destructive one.
+            Row {
               width: parent.width
-              text: "Remove receiver"
-              bordered: true
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              hasCursor: root.hasCursor("remove")
-              onClicked: removeConfirm.opened = true
+              spacing: Style.space(8)
+
+              Button {
+                width: (parent.width - parent.spacing) / 2
+                text: "Repair"
+                bordered: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                hasCursor: root.hasCursor("repair")
+                onClicked: root.repair()
+              }
+
+              Button {
+                width: (parent.width - parent.spacing) / 2
+                text: "Remove receiver"
+                bordered: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                hasCursor: root.hasCursor("remove")
+                onClicked: removeConfirm.opened = true
+              }
             }
           }
         }
@@ -677,6 +709,18 @@ Panel {
         cancelText: "Cancel"
         fontFamily: root.fontFamily
         onConfirmed: { opened = false; root.commitName() }
+        onCanceled: opened = false
+      }
+
+      ConfirmDialog {
+        id: repairConfirm
+        anchors.fill: parent
+        z: 100
+        message: "Repair reverts the receiver and sets it up again, so this will stop what is playing now."
+        confirmText: "Repair"
+        cancelText: "Cancel"
+        fontFamily: root.fontFamily
+        onConfirmed: { opened = false; root.svc.runRepair(); root.close() }
         onCanceled: opened = false
       }
 

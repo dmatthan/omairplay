@@ -485,6 +485,15 @@ Item {
     launchInTerminal(Util.shellQuote(pluginDir + "/bin/airplay-remove") + " --system")
   }
 
+  // Reverts the receiver and sets it up again, in one terminal. Both halves
+  // run as the user; sudo's per-tty credential cache means one prompt covers
+  // the whole repair in the common case. The script restores the unit's prior
+  // enabled/running state afterwards, which removal alone would drop.
+  function runRepair() {
+    if (busy) return
+    launchInTerminal(Util.shellQuote(pluginDir + "/bin/airplay-repair"))
+  }
+
   // Sealed like everything else here, and this one matters most: it is the
   // entry point to the privileged setup and removal.
   //
