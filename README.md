@@ -1,6 +1,6 @@
 # OmairPlay
 
-![OmairPlay](preview.png?v=3)
+![OmairPlay](preview.png?v=4)
 
 Turn your Omarchy machine into an AirPlay speaker with your iPhone as the remote.
 
@@ -80,7 +80,7 @@ the track changes, a notification appears with the cover art.
 
 It takes its colours and font from whichever Omarchy theme you're using:
 
-![The popup under four Omarchy themes](themes.png?v=3)
+![The popup under four Omarchy themes](themes.png?v=4)
 
 Control playback from your phone — it stays the player throughout.
 
