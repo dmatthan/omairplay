@@ -222,11 +222,12 @@ if ! command -v ufw >/dev/null 2>&1; then
 else
   mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
   if [[ -r /etc/default/ufw ]] && ! grep -qE '^IPV6=yes' /etc/default/ufw; then
-    warn "ufw has IPv6 disabled, so IPv6 rules are skipped. That is more than"
-    warn "a clock-sync problem: when the router offers IPv6, iOS runs the whole"
-    warn "session over it, and the symptom is a receiver that connects and shows"
-    warn "the track while playing nothing. If that happens, enable IPv6 in"
-    warn "/etc/default/ufw and run setup again."
+    # ufw with IPv6 off does not manage IPv6 at all: its backend skips the v6
+    # chains outright, so it is not filtering IPv6 and there are no v6 rules
+    # for it to hold. State the skip plainly rather than warning about a
+    # failure that cannot come from here -- if IPv6 is ever blocked by
+    # something else, the popup reports the receiver-as-silent symptom.
+    echo "ufw is not managing IPv6 (IPV6=no in /etc/default/ufw); no IPv6 rules to add."
     GLOBAL_V6=()
     SKIP_V6=yes
   else
