@@ -723,7 +723,7 @@ Panel {
 
               Button {
                 width: (parent.width - parent.spacing) / 2
-                text: "Remove receiver"
+                text: "Uninstall"
                 bordered: true
                 foreground: root.foreground
                 fontFamily: root.fontFamily
@@ -764,7 +764,7 @@ Panel {
         anchors.fill: parent
         z: 100
         message: "This turns the receiver off and undoes its setup, including the firewall rules. The installed packages are left alone."
-        confirmText: "Remove"
+        confirmText: "Uninstall"
         cancelText: "Cancel"
         fontFamily: root.fontFamily
         onConfirmed: { opened = false; root.svc.runRemove(); root.close() }

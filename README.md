@@ -111,14 +111,14 @@ the addresses your machine has now, in one terminal, so it prompts once for your
 password. It briefly stops the receiver, so it interrupts playback, and it puts
 the receiver back the way it was — on, off, and whether it starts at login.
 
-The old workaround, **Remove receiver** followed by setting it up again, still
+The old workaround, **Uninstall** followed by setting it up again, still
 works, but Repair is what it was doing, minus the guessing.
 
-## Removing it
+## Uninstalling it
 
 Two steps, in this order.
 
-1. **Remove receiver** in the popup. Stops the receiver, disables it at login,
+1. **Uninstall** in the popup. Stops the receiver, disables it at login,
    deletes its config and cover art, removes the firewall rules it added, and
    turns `nqptp` back off if setup was what enabled it.
 2. Remove the plugin:

@@ -282,7 +282,7 @@ echo
 bold "5. Receiver (user service, no root)"
 
 # Regenerate the config with the name the plugin has persisted, not the
-# generator's default. Setup runs after "Remove receiver" too, and the removal
+# generator's default. Setup runs after "Uninstall" too, and the removal
 # deletes the config while leaving the plugin's shell.json entry intact -- so
 # without this, reinstalling silently reset the speaker's name to
 # "Omarchy Speaker" while the popup's own setting still said something else.
@@ -354,7 +354,7 @@ Then look for "$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:
 If the speaker appears on the phone but will not connect, the firewall is the
 usual reason. Re-run this setup with --wide.
 
-To undo everything later, use "Remove receiver" in the plugin popup. A copy of
+To undo everything later, use "Uninstall" in the plugin popup. A copy of
 the uninstaller also lives outside the plugin folder, so it still works if the
 plugin itself is removed first:
 
