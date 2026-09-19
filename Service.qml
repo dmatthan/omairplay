@@ -257,10 +257,13 @@ Item {
 
   // One flag for "this cannot do its job", used by the status line so the
   // popup never reads READY next to a warning. The only fix is Repair, so the
-  // flag is about honesty, not about which action to offer.
-  readonly property bool needsRepair: !firewallOk
-    || (probed && setupComplete && effectiveRunning
-        && (!nqptpActive || !listening || audioStalled))
+  // flag is about honesty, not about which action to offer. Guarded on
+  // setupComplete: a machine that was never set up has no firewall rules yet,
+  // which is "Not set up", not a fault.
+  readonly property bool needsRepair: setupComplete
+    && (!firewallOk
+        || (probed && effectiveRunning
+            && (!nqptpActive || !listening || audioStalled)))
 
   property string pendingAction: ""
   readonly property bool busy: pendingAction !== ""
