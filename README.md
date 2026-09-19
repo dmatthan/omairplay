@@ -111,6 +111,9 @@ the addresses your machine has now, in one terminal, so it prompts once for your
 password. It briefly stops the receiver, so it interrupts playback, and it puts
 the receiver back the way it was — on, off, and whether it starts at login.
 
+A receiver that is up but has stopped responding is restarted on its own, up to
+twice in a quarter of an hour, before it asks you to press Repair.
+
 The old workaround, **Uninstall** followed by setting it up again, still
 works, but Repair is what it was doing, minus the guessing.
 

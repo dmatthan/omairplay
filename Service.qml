@@ -480,6 +480,40 @@ Item {
   onPlayingChanged: if (!playing) audioStalled = false
   onEffectiveRunningChanged: if (!effectiveRunning) audioStalled = false
 
+  // ------------------------------------------------------------ self-healing
+  //
+  // A wedged receiver (active, no listener) or a half-up session (MPRIS says
+  // playing, no PipeWire stream) is already silent, so restarting interrupts
+  // nothing. Two attempts inside a quarter hour, then the alert and the Repair
+  // button are the answer rather than an endless loop. clockSyncDown and
+  // firewall problems are excluded on purpose: the unit's ExecStartPre asserts
+  // nqptp, so a restart only fails, and rules need setup.
+  property int _autoRepairs: 0
+  property double _autoRepairWindowStart: 0
+  readonly property bool restartableStall: notListening || audioStalled
+
+  function autoRepair() {
+    var now = Date.now()
+    if (now - _autoRepairWindowStart > 15 * 60 * 1000) {
+      _autoRepairWindowStart = now
+      _autoRepairs = 0
+    }
+    if (_autoRepairs >= 2) return
+    _autoRepairs++
+    restart()
+  }
+
+  // The debounce is independent of the poll interval, so a 2-second refresh
+  // cannot make this hair-trigger: the stall has to last 15 seconds first.
+  Timer {
+    id: autoRepairTimer
+    interval: 15000
+    repeat: false
+    running: root.probed && root.setupComplete && !root.busy
+             && root.restartableStall
+    onTriggered: root.autoRepair()
+  }
+
   // --------------------------------------------------------------- actions
   function refresh() {
     if (!statusProcess.running) statusProcess.running = true
