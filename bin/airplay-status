@@ -93,26 +93,26 @@ systemctl is-active nqptp.service &>/dev/null && NQPTP=true
 # advertising over mDNS -- the state that looks ready and plays nothing. So
 # the popup can tell "active" from "usable" by looking at the listener.
 #
-# Read /proc/net/tcp{,6} directly: no new command to trust, no new privilege,
-# and it is the same net namespace the receiver runs in. Port 7000 is 0x1B58,
-# state 0A is LISTEN.
+# /proc/net/tcp and tcp6 are read directly, in bash. The poll runs every few
+# seconds, and a Python process here was a fork plus interpreter startup on
+# every refresh for two columns of a proc file. Port 7000 is 0x1B58, state 0A
+# is LISTEN, and bash converts the hex field itself with 16#.
+listening_on() {
+  local wanted="$1" file local_addr state port
+  for file in /proc/net/tcp /proc/net/tcp6; do
+    [[ -r $file ]] || continue
+    while read -r _ local_addr _ state _; do
+      [[ $state == 0A ]] || continue
+      port="${local_addr##*:}"
+      (( 16#$port == wanted )) && return 0
+    done < "$file"
+  done
+  return 1
+}
+
 LISTENING=false
-if [[ $ACTIVE == active ]]; then
-  LISTENING="$(python3 -I -c '
-for path in ("/proc/net/tcp", "/proc/net/tcp6"):
-    try:
-        fh = open(path)
-    except OSError:
-        continue
-    with fh:
-        next(fh, None)
-        for line in fh:
-            f = line.split()
-            if len(f) > 3 and f[3] == "0A" and int(f[1].split(":")[1], 16) == 7000:
-                print("true")
-                raise SystemExit
-print("false")
-')"
+if [[ $ACTIVE == active ]] && listening_on 7000; then
+  LISTENING=true
 fi
 
 # The name the receiver is actually advertising, read back from the generated
