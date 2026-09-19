@@ -82,7 +82,10 @@ Panel {
     if (svc.failed) return "AirPlay: could not start"
     if (svc.activating) return "AirPlay: starting"
     if (svc.actionLabel !== "") return "AirPlay: " + svc.actionLabel.toLowerCase()
+    if (!svc.firewallOk) return "AirPlay: needs repair"
     if (!svc.effectiveRunning) return "AirPlay: off"
+    if (svc.clockSyncDown || svc.notListening || svc.audioStalled)
+      return "AirPlay: needs repair"
     if (svc.playing && svc.hasTrack)
       return svc.artist !== "" ? (svc.title + " — " + svc.artist) : svc.title
     return "AirPlay: ready as " + svc.advertisedName
@@ -393,6 +396,7 @@ Panel {
               if (root.svc.failed) return "The receiver could not start"
               if (root.svc.activating) return "Starting up"
               if (!root.svc.effectiveRunning) return "The receiver is off"
+              if (root.svc.needsRepair) return "The receiver needs repair"
               return "Ready - waiting for a device"
             }
             color: root.dim
@@ -495,6 +499,10 @@ Panel {
               if (!root.svc) return ""
               // Discovery passes through ufw but the connection does not, so
               // the speaker shows up on the phone and then refuses to connect.
+              // Ignoring IPv6 is its own case: setup cannot fix it, only
+              // /etc/default/ufw can, so say that first.
+              if (root.svc.firewallIpv6Ignored)
+                return "Your firewall is ignoring IPv6 while your network offers it. Your phone may see this speaker but won't play through it. Set IPV6=yes in /etc/default/ufw, then press Repair below."
               // Lead with the count when the checker has it: "3 rules missing"
               // is more trustworthy than a generic sentence, and it tells the
               // user the check actually ran. Point at Repair rather than at
@@ -504,6 +512,29 @@ Panel {
                 ? (n + (n === 1 ? " firewall rule is" : " firewall rules are") + " missing for your current network. ")
                 : ""
               return lead + "Your phone may see this speaker but won't play through it. Press Repair below to fix it."
+            }
+          }
+
+          // The receiver says it is up but one of the things it needs is not
+          // there. None of these can be fixed in place from the shell, so the
+          // row only points at Repair; the reason decides which sentence.
+          AlertRow {
+            width: parent.width
+            visible: root.svc !== null && root.svc.setupComplete
+                     && root.svc.firewallOk
+                     && (root.svc.clockSyncDown || root.svc.notListening
+                         || root.svc.audioStalled)
+            urgent: false
+            foreground: root.foreground
+            urgentColor: root.urgent
+            fontFamily: root.fontFamily
+            text: {
+              if (!root.svc) return ""
+              if (root.svc.clockSyncDown)
+                return "The clock-sync service AirPlay 2 needs is not running. Press Repair below to fix it."
+              if (root.svc.notListening)
+                return "The receiver is running but not accepting connections. Press Repair below to fix it."
+              return "The track is showing but no audio is reaching this machine. Press Repair below to fix it."
             }
           }
 

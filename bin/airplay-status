@@ -81,6 +81,40 @@ PKG=false
 systemctl --user is-active shairport-sync.service &>/dev/null && PKG=true
 systemctl --user is-enabled shairport-sync.service &>/dev/null && PKG=true
 
+# The clock-sync service AirPlay 2 needs. It is a *system* service, so a plain
+# `systemctl is-active` reads it; asking needs no privilege. The unit asserts
+# it at start, but it can stop later without the receiver noticing, and then
+# the speaker is visible and silent.
+NQPTP=false
+systemctl is-active nqptp.service &>/dev/null && NQPTP=true
+
+# Whether the receiver is actually accepting connections. shairport-sync in a
+# dead audio context keeps running and tears down its listeners while still
+# advertising over mDNS -- the state that looks ready and plays nothing. So
+# the popup can tell "active" from "usable" by looking at the listener.
+#
+# Read /proc/net/tcp{,6} directly: no new command to trust, no new privilege,
+# and it is the same net namespace the receiver runs in. Port 7000 is 0x1B58,
+# state 0A is LISTEN.
+LISTENING=false
+if [[ $ACTIVE == active ]]; then
+  LISTENING="$(python3 -I -c '
+for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+    try:
+        fh = open(path)
+    except OSError:
+        continue
+    with fh:
+        next(fh, None)
+        for line in fh:
+            f = line.split()
+            if len(f) > 3 and f[3] == "0A" and int(f[1].split(":")[1], 16) == 7000:
+                print("true")
+                raise SystemExit
+print("false")
+')"
+fi
+
 # The name the receiver is actually advertising, read back from the generated
 # config rather than from the plugin's settings -- so the popup can tell the
 # difference between "you typed a new name" and "the receiver has that name".
@@ -133,6 +167,8 @@ printf '"active":"%s",' "$(json_escape "${ACTIVE:-unknown}")"
 printf '"unit_file":"%s",' "$(json_escape "${UNITFILE:-unknown}")"
 printf '"system_unit_busy":%s,' "$SYS"
 printf '"packaged_unit_busy":%s,' "$PKG"
+printf '"nqptp":%s,' "$NQPTP"
+printf '"listening":%s,' "$LISTENING"
 printf '"advertised_name":"%s",' "$(json_escape "$NAME")"
 printf '"config_stale":%s' "$STALE"
 printf '}\n'

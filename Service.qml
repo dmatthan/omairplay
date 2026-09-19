@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 import qs.Commons
 
 // Session-wide state for the AirPlay receiver.
@@ -237,6 +238,29 @@ Item {
   property bool firewallOk: true
   property string firewallReason: ""
   property var firewallMissing: []
+  // The quiet case: ufw is not ruling on IPv6 while the network offers it.
+  // Nothing is "missing" from ufw's point of view, so it needs its own flag.
+  property bool firewallIpv6Ignored: false
+
+  // The clock-sync service AirPlay 2 needs, and whether the receiver is
+  // actually accepting connections. Both are reported by airplay-status; the
+  // defaults keep a first poll from flashing a warning.
+  property bool nqptpActive: true
+  property bool listening: true
+
+  // The states the popup cannot fix in place, only advise Repair for. Guarded
+  // on `probed` and running so an off receiver never raises them.
+  readonly property bool clockSyncDown: probed && setupComplete
+    && effectiveRunning && !nqptpActive
+  readonly property bool notListening: probed && setupComplete
+    && effectiveRunning && !listening
+
+  // One flag for "this cannot do its job", used by the status line so the
+  // popup never reads READY next to a warning. The only fix is Repair, so the
+  // flag is about honesty, not about which action to offer.
+  readonly property bool needsRepair: !firewallOk
+    || (probed && setupComplete && effectiveRunning
+        && (!nqptpActive || !listening || audioStalled))
 
   property string pendingAction: ""
   readonly property bool busy: pendingAction !== ""
@@ -323,6 +347,7 @@ Item {
   // the bar tooltip appends its own detail. The track line is separate.
   readonly property string statusText: {
     if (actionLabel !== "") return actionLabel + "\u2026"
+    if (needsRepair) return "Needs repair"
     switch (receiverState) {
       case "missing":  return "Not set up"
       case "failed":   return "Failed"
@@ -405,6 +430,53 @@ Item {
     if (title !== "" && artist !== "") return title + "  -  " + artist
     return title !== "" ? title : artist
   }
+
+  // Whether a shairport-sync stream is actually feeding PipeWire. The control
+  // channel can be up while the audio path is dead -- a blocked IPv6 prefix,
+  // or a PulseAudio instance that restarted under the receiver -- and that is
+  // the "shows the track and plays nothing" state. The node exists only while
+  // audio flows, so its absence while MPRIS says playing is the signal.
+  //
+  // Same match as LevelMeter.qml: which field carries the name depends on how
+  // the stream was created, so check all of them.
+  readonly property var streamNode: findStreamNode()
+  readonly property bool audioStreamUp: streamNode !== null
+
+  function findStreamNode() {
+    var nodes = Pipewire.nodes ? Pipewire.nodes.values : []
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i]
+      if (!n || !n.isStream || !n.audio || n.isSink !== true) continue
+      var candidates = [n.name, n.nickname, n.description]
+      var props = n.properties
+      if (props) candidates.push(props["application.name"],
+                                props["application.process.binary"],
+                                props["node.name"], props["media.name"])
+      for (var j = 0; j < candidates.length; j++) {
+        if (String(candidates[j] || "").toLowerCase().indexOf("shairport") !== -1)
+          return n
+      }
+    }
+    return null
+  }
+
+  // Without this the node's properties are not kept live.
+  PwObjectTracker { objects: root.streamNode ? [root.streamNode] : [] }
+
+  // A few seconds of grace: the stream appears a beat after playback starts,
+  // and a false alarm would send someone to Repair for nothing.
+  property bool audioStalled: false
+  Timer {
+    id: audioStallTimer
+    interval: 4000
+    repeat: false
+    running: root.probed && root.setupComplete && root.effectiveRunning
+             && root.playing && root.hasTrack && !root.audioStreamUp
+    onTriggered: root.audioStalled = true
+  }
+  onAudioStreamUpChanged: if (audioStreamUp) audioStalled = false
+  onPlayingChanged: if (!playing) audioStalled = false
+  onEffectiveRunningChanged: if (!effectiveRunning) audioStalled = false
 
   // --------------------------------------------------------------- actions
   function refresh() {
@@ -616,6 +688,8 @@ Item {
         root.packagedUnitBusy = !!s.packaged_unit_busy
         root.advertisedName = String(s.advertised_name || "")
         root.configStale = !!s.config_stale
+        root.nqptpActive = s.nqptp !== false
+        root.listening = s.listening !== false
       } catch (e) {
         root.lastError = "Could not parse receiver status"
       }
@@ -645,6 +719,7 @@ Item {
         root.firewallOk = !!f.ok
         root.firewallReason = String(f.reason || "")
         root.firewallMissing = f.missing instanceof Array ? f.missing : []
+        root.firewallIpv6Ignored = !!f.ipv6_ignored
       } catch (e) {
         // Leave the last known answer alone rather than claim a problem.
       }
