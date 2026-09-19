@@ -495,7 +495,15 @@ Panel {
               if (!root.svc) return ""
               // Discovery passes through ufw but the connection does not, so
               // the speaker shows up on the phone and then refuses to connect.
-              return "Your firewall is blocking AirPlay, so your phone may see this speaker but fail to connect. Re-run setup to fix it."
+              // Lead with the count when the checker has it: "3 rules missing"
+              // is more trustworthy than a generic sentence, and it tells the
+              // user the check actually ran. Point at Repair rather than at
+              // re-running setup, which has no action of its own in the popup.
+              var n = root.svc.firewallMissing ? root.svc.firewallMissing.length : 0
+              var lead = n > 0
+                ? (n + (n === 1 ? " firewall rule is" : " firewall rules are") + " missing for your current network. ")
+                : ""
+              return lead + "Your phone may see this speaker but won't play through it. Press Repair below to fix it."
             }
           }
 
