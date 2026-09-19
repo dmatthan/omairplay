@@ -153,6 +153,11 @@ elif [[ $DO_SYSTEM != yes ]]; then
 # indistinguishable from a firewall holding no matching rules. Removal then
 # deleted itself and reported that nothing was left behind, while every rule
 # was still installed.
+elif [[ $DRY_RUN == yes ]]; then
+  # A dry run must not ask for a password, and reading the live rule set needs
+  # sudo. The delete commands below are derived from that list, so describe the
+  # step rather than print numbers that were never read.
+  echo "Would delete rules tagged \"$OMAIRPLAY_UFW_COMMENT\" and reload ufw."
 elif ! ufw_status="$(sudo ufw status numbered 2>&1)"; then
   UNFINISHED+=( "firewall rules tagged \"$OMAIRPLAY_UFW_COMMENT\"" )
   warn "Could not read the firewall rules, so none were removed."
