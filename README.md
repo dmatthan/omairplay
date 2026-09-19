@@ -104,8 +104,7 @@ omarchy bar move io.github.dmatthan.omairplay --section right
 
 Open the popup. OmairPlay reads the live `ufw` rules and the receiver's own
 health, and says so when something is wrong — missing rules, a new IPv6 prefix,
-a firewall that is ignoring IPv6, `nqptp` not running, or a track that is
-showing while no audio is arriving.
+`nqptp` not running, or a track that is showing while no audio is arriving.
 
 **Repair** fixes all of them. It reverts the receiver's setup and redoes it for
 the addresses your machine has now, in one terminal, so it prompts once for your

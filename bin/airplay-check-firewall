@@ -98,11 +98,6 @@ rule_present() {
 }
 
 mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
-# Whether the network hands out IPv6 at all, remembered before the list is
-# emptied below: a firewall that is not ruling on IPv6 while the network
-# offers it is its own problem, not an absence of rules.
-HAS_GLOBAL_V6=false
-(( ${#GLOBAL_V6[@]} )) && HAS_GLOBAL_V6=true
 [[ $UFW_IPV6 == true ]] || GLOBAL_V6=()
 # Bound the list. A machine with a pathological number of global IPv6 prefixes
 # would otherwise make this program's output -- and the rule set derived from
@@ -121,18 +116,11 @@ while IFS='|' read -r cidr port proto; do
     || MISSING+=( "allow from $cidr to any port $port proto $proto" )
 done < <(omairplay_rules yes ${GLOBAL_V6+"${GLOBAL_V6[@]}"})
 
-# ufw ignoring IPv6 while the network offers it is the quiet failure: discovery
-# and control arrive over IPv4, so the phone finds the speaker and shows the
-# track, while the audio iOS chose to send over IPv6 goes nowhere. Nothing is
-# missing from ufw's point of view -- it cannot rule on what it cannot see --
-# so this has to be reported as its own state, not as missing rules. Setup
-# cannot fix it either; only /etc/default/ufw can.
-IPV6_IGNORED=false
-if [[ $UFW_PRESENT == true && $UFW_ENABLED == true && $UFW_IPV6 != true \
-      && $HAS_GLOBAL_V6 == true ]]; then
-  IPV6_IGNORED=true
-fi
-
+# ufw with IPv6 turned off does not filter IPv6 at all -- its backend skips
+# the v6 chains outright -- so that is not a state to warn about. The rules
+# this machine would need are simply not ufw's to add, and the failure it could
+# cause is reported by airplay-status as a receiver that is up and silent.
+#
 # "ok" means "no reason to warn", not "everything was verified". A firewall
 # that is off blocks nothing.
 OK=false
@@ -141,8 +129,6 @@ if [[ $UFW_PRESENT == false || $UFW_ENABLED == false ]]; then
   OK=true
 elif (( ${#MISSING[@]} )); then
   REASON="${#MISSING[@]} firewall rule(s) missing"
-elif [[ $IPV6_IGNORED == true ]]; then
-  REASON="ufw is ignoring IPv6 while this network offers it"
 else
   OK=true
 fi
@@ -152,7 +138,6 @@ printf '"ok":%s,' "$OK"
 printf '"ufw_present":%s,' "$UFW_PRESENT"
 printf '"ufw_enabled":%s,' "$UFW_ENABLED"
 printf '"ufw_ipv6":%s,' "$UFW_IPV6"
-printf '"ipv6_ignored":%s,' "$IPV6_IGNORED"
 printf '"global_v6":%s,' "$(json_array ${GLOBAL_V6+"${GLOBAL_V6[@]}"})"
 printf '"missing":%s,' "$(json_array ${MISSING+"${MISSING[@]}"})"
 printf '"reason":"%s"' "$(json_escape "$REASON")"

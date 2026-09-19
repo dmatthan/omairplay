@@ -499,10 +499,6 @@ Panel {
               if (!root.svc) return ""
               // Discovery passes through ufw but the connection does not, so
               // the speaker shows up on the phone and then refuses to connect.
-              // Ignoring IPv6 is its own case: setup cannot fix it, only
-              // /etc/default/ufw can, so say that first.
-              if (root.svc.firewallIpv6Ignored)
-                return "Your firewall is ignoring IPv6 while your network offers it. Your phone may see this speaker but won't play through it. Set IPV6=yes in /etc/default/ufw, then press Repair below."
               // Lead with the count when the checker has it: "3 rules missing"
               // is more trustworthy than a generic sentence, and it tells the
               // user the check actually ran. Point at Repair rather than at

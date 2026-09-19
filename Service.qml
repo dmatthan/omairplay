@@ -238,9 +238,6 @@ Item {
   property bool firewallOk: true
   property string firewallReason: ""
   property var firewallMissing: []
-  // The quiet case: ufw is not ruling on IPv6 while the network offers it.
-  // Nothing is "missing" from ufw's point of view, so it needs its own flag.
-  property bool firewallIpv6Ignored: false
 
   // The clock-sync service AirPlay 2 needs, and whether the receiver is
   // actually accepting connections. Both are reported by airplay-status; the
@@ -722,7 +719,6 @@ Item {
         root.firewallOk = !!f.ok
         root.firewallReason = String(f.reason || "")
         root.firewallMissing = f.missing instanceof Array ? f.missing : []
-        root.firewallIpv6Ignored = !!f.ipv6_ignored
       } catch (e) {
         // Leave the last known answer alone rather than claim a problem.
       }
