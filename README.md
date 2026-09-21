@@ -4,7 +4,7 @@
 
 Turns your Omarchy machine into an AirPlay speaker with your iPhone as the remote.
 
-Control your music, podcasts, audiobooks, etc. from your phone? No bloated desktop apps needed. Skip the buggy
+Control your music, podcasts, audiobooks, etc. from your phone. No bloated desktop apps needed. Skip the buggy
 Linux clients: tap your machine from the iOS AirPlay list, and the audio
 comes out of your speakers, headphones, whatever audio source you want.
 
