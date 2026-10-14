@@ -2,16 +2,13 @@
 
 ![OmairPlay](preview.png?v=4)
 
-Turns your Omarchy machine into an AirPlay speaker with your iPhone as the remote.
+Turns your Omarchy machine into an AirPlay speaker. Tap it in your phone's
+AirPlay list and the audio comes out of your speakers — no desktop client, and
+playback stays on the phone.
 
-Control your music, podcasts, audiobooks, etc. from your phone. No bloated desktop apps needed. Skip the buggy
-Linux clients: tap your machine from the iOS AirPlay list, and the audio
-comes out of your speakers, headphones, whatever audio source you want.
-
-This plugin is a graphical interface with convenience features added to the tool
-`shairport-sync`. OmairPlay installs what's needed, securely configures and maintains AirPlay on your local network, puts the controls
-in your bar, and shows what's playing — all using your current Omarchy theme,
-of course!
+It wraps the terminal tool `shairport-sync` with a GUI: it installs what's
+needed, opens only the ports AirPlay uses and only to your local network, puts
+the receiver's state in your bar, and shows what's playing in your theme.
 
 ## Requirements
 
@@ -40,20 +37,19 @@ password prompt. It:
 2. Installs `shairport-sync` and `nqptp`.
 3. Enables `nqptp` as a **system** service — it needs privileged ports 319 and
    320 for AirPlay 2 clock sync.
-4. Adds `ufw` rules **limited to private networks**, never to Anywhere. Each one
-   is tagged `omairplay`, so you can always see what added it:
+4. Adds `ufw` rules **limited to private networks**, never to Anywhere, each
+   tagged `omairplay`:
 
    ```bash
    sudo ufw status | grep omairplay
    ```
 5. Writes the receiver's config and a user service under `$HOME`.
 
-**The plugin itself never needs root while running.** Only setup, Repair and
-removal do, and each runs visibly in a terminal.
-
-The receiver runs as a user service, `omarchy-airplay.service`. A machine gets
-one AirPlay 2 receiver, so if the packaged `shairport-sync` units are enabled,
-setup tells you which one to disable and how.
+**The plugin itself never needs root while running** — only setup, Repair and
+removal do, each visibly in a terminal. The receiver is a user service,
+`omarchy-airplay.service`. A machine gets one AirPlay 2 receiver, so if a
+packaged `shairport-sync` unit is enabled, setup names it and says how to
+disable it.
 
 ## Using it
 
@@ -70,29 +66,24 @@ The bar icon shows the receiver's state:
 | Cast | Playing |
 | Speaker, alert colour | Needs repair — press Repair in the popup |
 
-- **Click** — open the popup
-- **Right-click** — turn the receiver on or off without opening anything
+- **Click** — open the popup; **right-click** — turn the receiver on or off
 - In the popup: `j`/`k` or arrows to move, `Enter` to activate, `Esc` to close
 
 The popup shows what's playing — title, artist, album, cover art, the sending
 device's volume, and a level meter driven by the receiver's real output. Where
 the output device can't be metered, the meter is left out rather than drawn
-flat. When the track changes, a notification appears with the cover art.
-
-It takes its colours and font from whichever Omarchy theme you're using:
+flat. A track change raises a notification with the cover art.
 
 ![The popup under four Omarchy themes](themes.png?v=4)
 
-Control playback from your phone — it stays the player throughout.
+Colours and font come from your current Omarchy theme.
 
 ## Settings
 
-In the popup: **speaker name**, **start at login**, and **Repair**.
+In the popup: **speaker name**, **start at login**, and **Repair**. Renaming and
+Repair both interrupt playback, so each asks first.
 
-Renaming restarts the receiver, which interrupts playback, so it asks first.
-Repair does too.
-
-The rest are available via the bar config:
+The rest are bar settings:
 
 ```bash
 omarchy bar set io.github.dmatthan.omairplay trackNotifications false
@@ -103,35 +94,28 @@ omarchy bar move io.github.dmatthan.omairplay --section right
 
 ## If the speaker appears but won't play
 
-Open the popup. OmairPlay reads the live `ufw` rules and the receiver's own
-health, and says so when something is wrong — missing rules, a new IPv6 prefix,
-`nqptp` not running, or a track that is showing while no audio is arriving.
+Open the popup. OmairPlay reads the live `ufw` rules and the receiver's health
+and names what is wrong — a missing rule, a new IPv6 prefix, `nqptp` not
+running, or a track showing while no audio arrives. **Repair** reverts the
+receiver's setup and redoes it for the addresses your machine has now: one
+terminal, one password prompt, playback briefly interrupted, the receiver put
+back as it was.
 
-**Repair** fixes all of them. It reverts the receiver's setup and redoes it for
-the addresses your machine has now, in one terminal, so it prompts once for your
-password. It briefly stops the receiver, so it interrupts playback, and it puts
-the receiver back the way it was — on, off, and whether it starts at login.
-
-A receiver that is up but has stopped responding is restarted on its own, up to
-twice in a quarter of an hour, before it asks you to press Repair.
-
-The old workaround, **Uninstall** followed by setting it up again, still
-works, but Repair is what it was doing, minus the guessing.
+A receiver that stalls is restarted on its own, up to twice in a quarter of an
+hour, before it asks you to press Repair.
 
 ## Uninstalling it
 
-Two steps, in this order.
-
-1. **Uninstall** in the popup. Stops the receiver, disables it at login,
-   deletes its config and cover art, removes the firewall rules it added, and
-   turns `nqptp` back off if setup was what enabled it.
+1. **Uninstall** in the popup: stops the receiver, disables it at login, deletes
+   its config and cover art, removes the firewall rules it added, and turns
+   `nqptp` back off if setup was what enabled it.
 2. Remove the plugin:
 
    ```bash
    omarchy plugin remove io.github.dmatthan.omairplay
    ```
 
-If you remove the plugin first, the uninstaller still works from its own copy:
+Removing the plugin first is fine — the uninstaller keeps its own copy:
 
 ```bash
 ~/.local/state/io.github.dmatthan.omairplay/airplay-remove --system
@@ -151,20 +135,17 @@ The `shairport-sync` and `nqptp` packages stay installed.
 | `nqptp.service` | enabled, for AirPlay 2 clock sync |
 | `shairport-sync`, `nqptp` | packages, from Arch `extra` |
 
-Only the last three touch anything outside `$HOME`. No autostart entries, no
-`PATH` changes, no shell-profile edits, no scheduled jobs. Removal reverses all
-of it.
+Only the last three touch anything outside `$HOME`: no autostart entries, no
+`PATH` changes, no profile edits, no scheduled jobs. Removal reverses all of it.
 
 ## Notes on safety
 
-Omarchy plugins run unsandboxed, with your user's permissions — this one
-included. What that means here:
+Omarchy plugins run unsandboxed with your user's permissions, this one included:
 
-- Root is used only by setup, Repair and removal, each run visibly in a terminal
-  so you can read every command before approving it.
-- Firewall rules are limited to private address ranges, never to Anywhere, and
-  `ufw` is never disabled or reset. Every rule is tagged `omairplay`, and
-  removal finds them by that tag.
+- Root is used only by setup, Repair and removal, each run visibly in a terminal.
+- Firewall rules cover private ranges only, never Anywhere, and `ufw` is never
+  disabled or reset. Every rule is tagged `omairplay`, and removal finds them by
+  that tag.
 - Your local network is the trust boundary: a device has to be on it to reach
   the receiver.
 - Commands are called by full path, in an environment the scripts build
