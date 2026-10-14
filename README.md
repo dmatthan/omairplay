@@ -75,8 +75,9 @@ The bar icon shows the receiver's state:
 - In the popup: `j`/`k` or arrows to move, `Enter` to activate, `Esc` to close
 
 The popup shows what's playing — title, artist, album, cover art, the sending
-device's volume, and a level meter driven by the receiver's real output. When
-the track changes, a notification appears with the cover art.
+device's volume, and a level meter driven by the receiver's real output. Where
+the output device can't be metered, the meter is left out rather than drawn
+flat. When the track changes, a notification appears with the cover art.
 
 It takes its colours and font from whichever Omarchy theme you're using:
 

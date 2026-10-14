@@ -7,6 +7,10 @@ import qs.Commons
 // Gated on the popup being open: with `active` false the peak monitor is off,
 // the timer stops and the history clears, so nothing here costs anything while
 // the popup is shut. Service.qml does not know this exists.
+//
+// The strip is hidden, not drawn flat, while the monitor has no levels to give
+// -- see `_heardAudio`. Sampling carries on while it is hidden, or it could
+// never find out that levels came back.
 Item {
   id: root
 
@@ -19,9 +23,25 @@ Item {
   readonly property var streamNode: findStream()
   readonly property bool live: active && streamNode !== null
 
-  implicitHeight: view.implicitHeight
-  visible: live
-  opacity: live ? 1 : 0
+  // Whether the monitor has produced a level at all for this stream. Quickshell
+  // 0.3.1 publishes nothing for a node whose channel list is narrower than the
+  // stream it captured -- it logs "missing channels present in capture stream"
+  // and returns before updatePeaks (peak.cpp:295-300), which is what a stereo
+  // stream the graph expanded into a multi-channel sink triggers.
+  //
+  // Values, not rate: peaksChanged fires only on change, so a silent passage
+  // stops reporting too, and a "nothing lately" test would hide the strip
+  // mid-song. Re-armed on renegotiation, so the strip comes back by itself once
+  // the graph is meterable -- upstream fix (quickshell-mirror/quickshell#1147)
+  // or a move to a stereo output.
+  property bool _heardAudio: false
+  readonly property bool delivering: live && _heardAudio
+
+  // A hidden row costs no space in the popup's Column, the way AlertRow's
+  // does; collapsing both ways keeps the panel sized to what it shows.
+  implicitHeight: visible ? view.implicitHeight : 0
+  visible: delivering
+  opacity: delivering ? 1 : 0
   Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
 
   // Match on anything that identifies shairport-sync, because which field
@@ -70,6 +90,14 @@ Item {
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0
   }
 
+  // Any channel, not only the first two: a virtual sink can carry the audio
+  // somewhere other than front left and right, and a level anywhere means the
+  // monitor is working.
+  function anyPeak(list) {
+    for (var i = 0; i < list.length; i++) if (list[i] > 0) return true
+    return false
+  }
+
   PwNodePeakMonitor {
     node: root.streamNode
     enabled: root.live
@@ -80,10 +108,13 @@ Item {
       var r = root.clamp(p.length > 1 ? p[1] : p[0])
       root._sum += (l + r) / 2
       root._count++
+      if (root.anyPeak(p)) root._heardAudio = true
     }
+    // A renegotiated capture is a different graph: judge its levels afresh.
+    onChannelsChanged: root._heardAudio = false
   }
 
-  onLiveChanged: if (!live) view.reset()
+  onLiveChanged: if (!live) { root._heardAudio = false; view.reset() }
 
   LevelMeterView {
     id: view
