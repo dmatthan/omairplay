@@ -645,7 +645,9 @@ Panel {
               fontFamily: root.fontFamily
             }
 
-            TextField {
+            // Not a TextField: that reads the clipboard on its own -- see
+            // NameField.qml.
+            NameField {
               id: nameField
               width: parent.width
               // Deliberately not bound to nameDraft: the value is seeded when
@@ -653,33 +655,20 @@ Panel {
               // never fighting a binding for the field's contents.
               foreground: root.foreground
               placeholderText: "Omarchy Speaker"
-              // TextField sets font.family itself; follow the bar's font
-              // rather than the global default so themes carry through.
-              font.family: root.fontFamily
+              // Follow the bar's font rather than the global default so themes
+              // carry through.
+              fontFamily: root.fontFamily
               hasCursor: root.hasCursor("name")
               // shairport-sync caps the advertised name at 50 characters, so
               // stop at the limit rather than silently truncating later.
               maximumLength: 50
               onTextChanged: root.nameDraft = text
-              // Handled here and accepted, not in onAccepted: TextInput passes
-              // Return on to its parents after emitting accepted, and once focus
-              // has moved the panel would take that same press as confirming
-              // the rename dialog it just opened.
-              Keys.onReturnPressed: function(event) {
-                event.accepted = true; root.leaveNameField(); root.submitName()
-              }
-              Keys.onEnterPressed: function(event) {
-                event.accepted = true; root.leaveNameField(); root.submitName()
-              }
-              Keys.onEscapePressed: function(event) {
-                root.revertName(); root.leaveNameField(); event.accepted = true
-              }
-              Keys.onUpPressed: function(event) {
-                root.leaveNameField(); root.moveCursor(-1); event.accepted = true
-              }
-              Keys.onDownPressed: function(event) {
-                root.leaveNameField(); root.moveCursor(1); event.accepted = true
-              }
+              // The field accepts these keys itself, so the press that submits
+              // never reaches the panel, which would otherwise take it as
+              // confirming the rename dialog it just opened.
+              onSubmitted: { root.leaveNameField(); root.submitName() }
+              onCancelled: { root.revertName(); root.leaveNameField() }
+              onNavigated: function(delta) { root.leaveNameField(); root.moveCursor(delta) }
             }
 
             Text {
