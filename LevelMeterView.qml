@@ -24,7 +24,14 @@ Item {
   // pixel grid unevenly: wider ones form light bands, and a scroll that moves a
   // non-whole number of pixels shimmers as every bar's antialiasing changes
   // from frame to frame.
-  readonly property real dpr: Math.max(1, Screen.devicePixelRatio)
+  //
+  // The window's ratio, not the screen's: under fractional scaling Screen
+  // reports the output's integer scale (2 at 1.25), and the bars flickered.
+  // Window.devicePixelRatio is Qt 6.11+; older Qt falls back.
+  readonly property real dpr: {
+    var w = Window.window ? Window.window.devicePixelRatio : 0
+    return Math.max(1, w > 0 ? w : Screen.devicePixelRatio)
+  }
   readonly property int barPx: Math.max(2, Math.round(Style.space(3) * dpr))
   readonly property int gapPx: Math.max(1, Math.round(Style.space(2) * dpr))
   readonly property int pitchPx: barPx + gapPx
