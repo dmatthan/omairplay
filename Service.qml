@@ -149,6 +149,7 @@ Item {
   property bool _statusCapped: false
   property bool _firewallCapped: false
   property bool _actionCapped: false
+  property bool _coverCapped: false
 
   readonly property string probeKillAfter: "--kill-after=5s"
   readonly property string actionKillAfter: "--kill-after=10s"
@@ -315,6 +316,31 @@ Item {
   readonly property string artUrl: player ? String(player.trackArtUrl || "") : ""
   readonly property bool hasTrack: title !== "" || artist !== ""
 
+  // The only cover the popup and notification may load: bin/airplay-cover-art's
+  // rebuilt copy, never the sender's file at artUrl. Empty when there is no art
+  // or it is refused; the last cover stays up while the next is rebuilt.
+  property string coverArt: ""
+  readonly property string coverArtUrl: coverArt === "" ? ""
+    : "file://" + coverArt.split("/").map(encodeURIComponent).join("/")
+  // The artUrl the running rebuild was given, so a stale answer is dropped.
+  property string _coverArtFor: ""
+
+  onArtUrlChanged: refreshCoverArt()
+
+  // Whether the cover for the current art is still to come.
+  readonly property bool coverArtPending: coverProcess.running
+    || (artUrl !== "" && _coverArtFor !== artUrl)
+
+  function refreshCoverArt() {
+    if (artUrl === "") { coverArt = ""; return }
+    // One rebuild at a time; onExited starts the next if the art moved on.
+    if (coverProcess.running) return
+    _coverArtFor = artUrl
+    coverProcess.command = [binTimeout, probeKillAfter, probeDeadlineSec,
+                            pluginDir + "/bin/airplay-cover-art", artUrl]
+    coverProcess.running = true
+  }
+
   // The phone's own volume: readable, and not settable from here.
   readonly property real senderVolume: {
     if (!player) return -1
@@ -393,6 +419,10 @@ Item {
   function notifyTrackChange() {
     if (!trackNotifications || !playing || !hasTrack) return
     if (trackKey === _notifiedTrack) return
+    // Give a cover still being rebuilt the moment it needs, rather than
+    // announce without it or with the last track's. The rebuild has its own
+    // deadline.
+    if (coverArtPending) { notifyDebounce.restart(); return }
     _notifiedTrack = trackKey
 
     // Don't announce whatever was already playing when this service loaded --
@@ -405,9 +435,9 @@ Item {
     // deadline can sit directly on it.
     var args = [binTimeout, probeKillAfter, probeDeadlineSec,
                 binNotifySend, "-a", "OmairPlay"]
-    var art = String(artUrl || "")
-    if (art.indexOf("file://") === 0)
-      args.push("-i", decodeURIComponent(art.substring(7)))
+    // The rebuilt copy only: the shell's notification server decodes it too.
+    if (coverArt !== "")
+      args.push("-i", coverArt)
     args.push(title !== "" ? title : "AirPlay")
 
     var sub = []
@@ -422,7 +452,11 @@ Item {
     })
   }
 
-  Component.onCompleted: _serviceLoadedAt = Date.now()
+  Component.onCompleted: {
+    _serviceLoadedAt = Date.now()
+    // A shell restart mid-song: the art is already there and will not change.
+    refreshCoverArt()
+  }
 
   // "Title - Artist", or as much of it as there is.
   readonly property string trackLine: {
@@ -758,6 +792,36 @@ Item {
       } catch (e) {
         // Leave the last known answer alone rather than claim a problem.
       }
+    }
+  }
+
+  Process {
+    id: coverProcess
+    command: []
+    running: false
+    clearEnvironment: true
+    environment: root.sealedEnv
+    stdout: StdioCollector {
+      id: coverOut
+      waitForEnd: false
+      onDataChanged: if (text.length > root.maxChildBytes && coverProcess.running) {
+        root._coverCapped = true
+        coverProcess.signal(15)
+      }
+    }
+    onExited: function(exitCode) {
+      var capped = root._coverCapped
+      root._coverCapped = false
+      if (root._coverArtFor !== root.artUrl) {
+        Qt.callLater(root.refreshCoverArt)
+        return
+      }
+      // Only ever a copy in the helper's own directory, named as it names them.
+      // Refused art clears the cover rather than leave the last track's up.
+      var path = String(coverOut.text || "").trim()
+      root.coverArt = !capped && exitCode === 0
+          && /^\/.*\/\.cache\/shairport-sync\/omairplay-art\/cover-[0-9a-f]{32}\.(png|jpg)$/.test(path)
+        ? path : ""
     }
   }
 

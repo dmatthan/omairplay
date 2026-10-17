@@ -1,0 +1,360 @@
+#!/usr/bin/python3 -I
+"""Rebuild the receiver's cover art before the shell decodes it.
+
+    airplay-cover-art URL
+
+Prints the path of a rebuilt copy of shairport-sync's cached art, or exits 1.
+The art is whatever the sending device sent, and Qt's PNG reader expands
+compressed text chunks before any size limit, so the shell only ever loads
+this copy: PNG or JPEG (by content, not name), size-capped, image data only.
+PNG keeps IHDR/PLTE/tRNS/IDAT/IEND, with the data checked against the header;
+JPEG keeps its tables, one 8-bit Huffman frame and its scans. Anything else,
+or anything malformed, is refused.
+"""
+
+import hashlib
+import os
+import pwd
+import re
+import secrets
+import stat
+import sys
+import time
+import zlib
+
+MAX_INPUT_BYTES = 4 << 20
+MAX_SIDE = 4096
+MAX_PIXELS = 4096 * 4096
+# Each progressive scan is another pass over the image; real files use ~10.
+MAX_JPEG_SCANS = 32
+# A notification may still be loading an older copy.
+KEEP_COPIES = 4
+
+# shairport-sync's naming, which the copies reuse.
+COVER_NAME = re.compile(r"cover-[0-9a-f]{32}\.(?:jpg|png)")
+TEMP_PREFIX = ".tmp-"
+
+
+def refuse(reason):
+    print(f"airplay-cover-art: {reason}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+# ----------------------------------------------------------------------- PNG
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_DEPTHS = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8),
+              4: (8, 16), 6: (8, 16)}
+PNG_SAMPLES = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+ADAM7 = ((0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4),
+         (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2))
+
+
+def png_chunk(tag, payload):
+    crc = zlib.crc32(payload, zlib.crc32(tag))
+    return len(payload).to_bytes(4, "big") + tag + payload + crc.to_bytes(4, "big")
+
+
+def png_row_sizes(width, height, depth, colour, interlace):
+    """Bytes per row, filter byte included, in decoding order."""
+    bits = PNG_SAMPLES[colour] * depth
+    for x0, y0, dx, dy in ADAM7 if interlace else ((0, 0, 1, 1),):
+        columns = max(0, (width - x0 + dx - 1) // dx)
+        rows = max(0, (height - y0 + dy - 1) // dy)
+        if columns:
+            for _ in range(rows):
+                yield 1 + (columns * bits + 7) // 8
+
+
+def png_data_matches(compressed, header):
+    """Whether the data inflates to exactly the declared rows, a row at a time."""
+    inflater = zlib.decompressobj()
+    pending = compressed
+    try:
+        for size in png_row_sizes(*header):
+            row = inflater.decompress(pending, size)
+            pending = inflater.unconsumed_tail
+            if len(row) != size or row[0] > 4:
+                return False
+        return (inflater.decompress(pending, 1) == b"" and inflater.eof
+                and not inflater.unused_data)
+    except zlib.error:
+        return False
+
+
+def rebuild_png(data):
+    pos = len(PNG_SIGNATURE)
+    header = ihdr = palette = transparency = None
+    image = []
+    image_ended = False
+    while True:
+        if len(data) - pos < 12:
+            return None
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        tag = data[pos + 4:pos + 8]
+        end = pos + 12 + length
+        if end > len(data) or not tag.isalpha():
+            return None
+        payload = data[pos + 8:end - 4]
+        if zlib.crc32(payload, zlib.crc32(tag)) != int.from_bytes(data[end - 4:end], "big"):
+            return None
+        pos = end
+        if header is None and tag != b"IHDR":
+            return None
+        if image and tag != b"IDAT":
+            image_ended = True
+
+        if tag == b"IHDR":
+            if header is not None or length != 13:
+                return None
+            width = int.from_bytes(payload[0:4], "big")
+            height = int.from_bytes(payload[4:8], "big")
+            depth, colour, compression, filtering, interlace = payload[8:13]
+            if (not 0 < width <= MAX_SIDE or not 0 < height <= MAX_SIDE
+                    or width * height > MAX_PIXELS
+                    or depth not in PNG_DEPTHS.get(colour, ())
+                    or compression != 0 or filtering != 0 or interlace > 1):
+                return None
+            header = (width, height, depth, colour, interlace)
+            ihdr = payload
+        elif tag == b"PLTE":
+            if colour != 3:
+                continue  # Only a suggestion outside indexed images.
+            if (palette is not None or image or length % 3
+                    or not 0 < length // 3 <= 1 << depth):
+                return None
+            palette = payload
+        elif tag == b"tRNS":
+            if transparency is not None or image:
+                return None
+            if colour == 3:
+                if palette is None or not 0 < length <= len(palette) // 3:
+                    return None
+            elif colour in (0, 2):
+                if length != (2 if colour == 0 else 6) or any(
+                        int.from_bytes(payload[i:i + 2], "big") >> depth
+                        for i in range(0, length, 2)):
+                    return None
+            else:
+                continue  # Not allowed with an alpha channel; dropped.
+            transparency = payload
+        elif tag == b"IDAT":
+            if image_ended or (colour == 3 and palette is None):
+                return None
+            image.append(payload)
+        elif tag == b"IEND":
+            compressed = b"".join(image)
+            if length or not compressed or not png_data_matches(compressed, header):
+                return None
+            out = PNG_SIGNATURE + png_chunk(b"IHDR", ihdr)
+            if colour == 3:  # Padded, so no pixel can index past the palette.
+                out += png_chunk(b"PLTE", palette.ljust(3 << depth, b"\0"))
+            if transparency is not None:
+                out += png_chunk(b"tRNS", transparency)
+            return out + png_chunk(b"IDAT", compressed) + png_chunk(b"IEND", b"")
+        elif not tag[0] & 0x20:
+            return None  # Unknown critical chunk.
+
+
+# ---------------------------------------------------------------------- JPEG
+
+JPEG_TABLES = (0xDB, 0xC4, 0xDD)   # DQT, DHT, DRI
+JPEG_FRAMES = (0xC0, 0xC1, 0xC2)   # baseline, extended, progressive; Huffman
+JPEG_SOS, JPEG_EOI = 0xDA, 0xD9
+
+
+def rebuild_jpeg(data):
+    out = bytearray(b"\xff\xd8")
+    pos = 2
+    frame = False
+    scans = 0
+    while True:
+        if pos >= len(data) or data[pos] != 0xFF:
+            return None
+        while pos < len(data) and data[pos] == 0xFF:  # fill bytes
+            pos += 1
+        if pos >= len(data):
+            return None
+        marker = data[pos]
+        pos += 1
+        if marker == JPEG_EOI:
+            return bytes(out + b"\xff\xd9") if scans else None
+        if len(data) - pos < 2:
+            return None
+        length = int.from_bytes(data[pos:pos + 2], "big")
+        if length < 2 or pos + length > len(data):
+            return None
+        segment = data[pos - 2:pos + length]  # marker, length and body
+        body = data[pos + 2:pos + length]
+        pos += length
+
+        if 0xE0 <= marker <= 0xEF or marker == 0xFE:
+            continue  # APPn and comments: dropped unparsed.
+        if marker in JPEG_TABLES:
+            out += segment
+        elif marker in JPEG_FRAMES:
+            if frame or len(body) < 6:
+                return None
+            height = int.from_bytes(body[1:3], "big")
+            width = int.from_bytes(body[3:5], "big")
+            components = body[5]
+            # Height 0 would defer to a DNL marker.
+            if (body[0] != 8 or components not in (1, 3)
+                    or len(body) != 6 + 3 * components
+                    or not 0 < width <= MAX_SIDE or not 0 < height <= MAX_SIDE
+                    or width * height > MAX_PIXELS):
+                return None
+            frame = True
+            out += segment
+        elif marker == JPEG_SOS:
+            scans += 1
+            if not frame or scans > MAX_JPEG_SCANS or not body \
+                    or not 1 <= body[0] <= 4 or len(body) != 4 + 2 * body[0]:
+                return None
+            out += segment
+            # Scan data runs to the next marker other than 0xFF00 or RSTn.
+            start = pos
+            while True:
+                pos = data.find(b"\xff", pos)
+                if pos < 0 or pos + 1 >= len(data):
+                    return None
+                follower = data[pos + 1]
+                if follower == 0x00 or 0xD0 <= follower <= 0xD7:
+                    pos += 2
+                elif follower == 0xFF:
+                    pos += 1
+                else:
+                    break
+            out += data[start:pos]
+        else:
+            return None  # Other frame types, DAC, DNL, a second SOI, stray RSTn.
+
+
+# -------------------------------------------------------------------- files
+
+def open_dir(parent, name, create=False):
+    """Open one directory component, following no symlink."""
+    if create:
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent)
+        except FileExistsError:
+            pass
+    return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+
+
+def read_source(source_dir, name):
+    """No symlink, a regular file (O_NONBLOCK so a FIFO cannot stall), capped."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=source_dir)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            refuse("the cover art is not a regular file")
+        if st.st_size > MAX_INPUT_BYTES:
+            refuse("the cover art is too large")
+        os.set_blocking(fd, True)
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            data = fh.read(MAX_INPUT_BYTES + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(data) > MAX_INPUT_BYTES:
+        refuse("the cover art is too large")
+    return data
+
+
+def write_copy(copy_dir, name, content):
+    """O_EXCL temporary, 0600, fsync, atomic rename; an existing copy is reused."""
+    try:
+        existing = os.lstat(name, dir_fd=copy_dir)
+    except FileNotFoundError:
+        existing = None
+    if existing is not None:
+        if not stat.S_ISREG(existing.st_mode):
+            refuse(f"{name} exists and is not a regular file")
+        os.utime(name, dir_fd=copy_dir, follow_symlinks=False)
+        return
+    tmp = TEMP_PREFIX + secrets.token_hex(8)
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=copy_dir)
+        with os.fdopen(fd, "wb") as fh:
+            os.fchmod(fh.fileno(), 0o600)
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, name, src_dir_fd=copy_dir, dst_dir_fd=copy_dir)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=copy_dir)
+        except OSError:
+            pass
+        raise
+
+
+def prune(copy_dir, current):
+    """Keep the newest copies; clear temporaries a killed run left behind."""
+    copies = []
+    now = time.time()
+    with os.scandir(copy_dir) as entries:
+        for entry in entries:
+            st = entry.stat(follow_symlinks=False)
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            if entry.name.startswith(TEMP_PREFIX):
+                if now - st.st_mtime > 60:
+                    os.unlink(entry.name, dir_fd=copy_dir)
+            elif COVER_NAME.fullmatch(entry.name) and entry.name != current:
+                copies.append((st.st_mtime, entry.name))
+    for _, name in sorted(copies, reverse=True)[KEEP_COPIES - 1:]:
+        os.unlink(name, dir_fd=copy_dir)
+
+
+def main(argv):
+    if len(argv) != 1:
+        refuse("usage: airplay-cover-art URL")
+    home = pwd.getpwuid(os.getuid()).pw_dir  # As the generated config uses.
+    cache = os.path.join(home, ".cache", "shairport-sync")
+    prefix = "file://" + os.path.join(cache, "coverart") + "/"
+    url = argv[0]
+    if not url.startswith(prefix) or not COVER_NAME.fullmatch(url[len(prefix):]):
+        refuse("not the receiver's cover art")
+
+    home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY)
+    opened = [home_fd]
+    try:
+        for part in (".cache", "shairport-sync"):
+            opened.append(open_dir(opened[-1], part))
+        cache_fd = opened[-1]
+        opened.append(open_dir(cache_fd, "coverart"))
+        data = read_source(opened[-1], url[len(prefix):])
+
+        if data.startswith(PNG_SIGNATURE):
+            rebuilt, ext = rebuild_png(data), "png"
+        elif data.startswith(b"\xff\xd8\xff"):
+            rebuilt, ext = rebuild_jpeg(data), "jpg"
+        else:
+            rebuilt, ext = None, ""
+        if rebuilt is None:
+            refuse("the cover art is not a PNG or JPEG this accepts")
+
+        opened.append(open_dir(cache_fd, "omairplay-art", create=True))
+        copy_dir = opened[-1]
+        st = os.fstat(copy_dir)
+        if st.st_uid != os.getuid():
+            refuse("the copy directory belongs to someone else")
+        os.fchmod(copy_dir, 0o700)
+
+        name = f"cover-{hashlib.sha256(rebuilt).hexdigest()[:32]}.{ext}"
+        write_copy(copy_dir, name, rebuilt)
+        prune(copy_dir, name)
+    except OSError as exc:
+        refuse(exc.strerror or str(exc))
+    finally:
+        for fd in opened:
+            os.close(fd)
+    print(os.path.join(cache, "omairplay-art", name))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -427,7 +427,7 @@ Panel {
           Item {
             width: parent.width
             visible: root.showArtwork && root.svc !== null && root.svc.setupComplete
-                     && root.svc.effectiveRunning && root.svc.playing && root.svc.artUrl !== ""
+                     && root.svc.effectiveRunning && root.svc.playing && root.svc.coverArtUrl !== ""
             implicitHeight: visible ? Style.space(132) : 0
 
             Image {
@@ -435,14 +435,13 @@ Panel {
               anchors.centerIn: parent
               width: Math.min(parent.width, Style.space(132))
               height: width
-              source: root.svc && root.svc.artUrl !== "" ? root.svc.artUrl : ""
+              // The rebuilt copy, never the sender's file -- see coverArt in
+              // Service.qml. A local file:// read with nothing to fetch.
+              source: root.svc ? root.svc.coverArtUrl : ""
               fillMode: Image.PreserveAspectCrop
               asynchronous: true
               cache: false
               smooth: true
-              // shairport-sync writes the art into the cache directory the
-              // generated config names, under $HOME, so this is a plain
-              // file:// read with nothing to fetch over the network.
               onStatusChanged: if (status === Image.Error) visible = false
             }
           }

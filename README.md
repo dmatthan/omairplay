@@ -129,7 +129,7 @@ The `shairport-sync` and `nqptp` packages stay installed.
 |---|---|
 | `~/.config/shairport-sync/shairport-sync.conf` | the receiver's config, from your settings |
 | `~/.config/systemd/user/omarchy-airplay.service` | the service that runs the receiver |
-| `~/.cache/shairport-sync/` | cover art |
+| `~/.cache/shairport-sync/` | cover art as sent, and the rebuilt copies the popup shows |
 | `~/.local/state/io.github.dmatthan.omairplay/` | the uninstaller and the helpers the service needs |
 | `ufw` rules | each tagged `omairplay`, private ranges only — the count depends on which ranges your machine is on |
 | `nqptp.service` | enabled, for AirPlay 2 clock sync |
@@ -148,6 +148,9 @@ Omarchy plugins run unsandboxed with your user's permissions, this one included:
   that tag.
 - Your local network is the trust boundary: a device has to be on it to reach
   the receiver.
+- Cover art is whatever the sending device sends, so the popup and
+  notifications never show it as sent: only a copy rebuilt from its image data,
+  PNG or JPEG only, size-capped, with all metadata removed.
 - Commands are called by full path, in an environment the scripts build
   themselves, so nothing inherited from your session changes what runs.
 
