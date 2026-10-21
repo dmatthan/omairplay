@@ -73,8 +73,11 @@ escape_libconfig() {
 # Control characters first: a newline would end the string and let the rest
 # land as directives, and libconfig has hooks that run commands. Enforced here,
 # not in the caller, since settings and the command line reach this too.
+# Cut to at most N bytes without splitting a UTF-8 character (LC_ALL=C counts
+# bytes); iconv -c drops a partial one at the end.
+utf8_cut() { printf '%s' "${1:0:$2}" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true; }
 NAME="${NAME//[[:cntrl:]]/}"
-NAME="${NAME:0:50}"
+NAME="$(utf8_cut "$NAME" 50)"
 [[ -n ${NAME//[[:space:]]/} ]] || NAME="Omarchy Speaker"
 
 render() {
@@ -144,6 +147,7 @@ fi
 
 # Through the installer: mkdir -p would follow a planted symlink.
 "$INSTALL_FILE" --mkdir "$CONFIG_DIR" 0700 >/dev/null
+"$INSTALL_FILE" --mkdir "$CACHE_DIR" 0700 >/dev/null
 "$INSTALL_FILE" --mkdir "$CACHE_DIR/coverart" 0700 >/dev/null
 TMP="$(mktemp "$CONFIG_DIR/.shairport-sync.conf.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT

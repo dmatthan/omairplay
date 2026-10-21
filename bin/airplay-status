@@ -103,6 +103,10 @@ listening_on() {
   return 1
 }
 
+# Cut to at most N bytes without splitting a UTF-8 character (LC_ALL=C counts
+# bytes); iconv -c drops a partial one at the end.
+utf8_cut() { printf '%s' "${1:0:$2}" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true; }
+
 LISTENING=false
 if [[ $ACTIVE == active ]] && listening_on 7000; then
   LISTENING=true
@@ -121,7 +125,7 @@ if [[ $ACTIVE == active ]]; then
     CLIENT="$(printf '%s' "$CLIENT" \
       | sed -E 's/\\u[0-9a-fA-F]{4}//g; s/\\[bfnrt]//g; s/\\"/"/g; s/\\\\/\\/g')"
     CLIENT="${CLIENT//[[:cntrl:]]/}"
-    CLIENT="${CLIENT:0:256}"
+    CLIENT="$(utf8_cut "$CLIENT" 256)"
   else
     CLIENT=""
   fi
@@ -144,7 +148,8 @@ if [[ -f $CONFIG && ! -L $CONFIG ]]; then
   NAME="${NAME//\\\"/\"}"
   NAME="${NAME//\\\\/\\}"
   # Bounded: the file is hand-editable, and the output stays bounded.
-  NAME="${NAME:0:64}"
+  NAME="${NAME//[[:cntrl:]]/}"
+  NAME="$(utf8_cut "$NAME" 64)"
 fi
 
 # The config is read only at startup, so one written since is not live yet.
