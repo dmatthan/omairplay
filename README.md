@@ -80,16 +80,15 @@ Colours and font come from your current Omarchy theme.
 
 ## Settings
 
-In the popup: **speaker name**, **start at login**, and **Repair**. Renaming and
-Repair both interrupt playback, so each asks first.
+All in the popup: **start at login**, **speaker name**, **track notifications**,
+**cover art**, and **Repair**. Renaming and Repair both interrupt playback, so
+each asks first.
 
-The rest are bar settings:
+The toggles are also bar settings, if you prefer the command line:
 
 ```bash
 omarchy bar set io.github.dmatthan.omairplay trackNotifications false
 omarchy bar set io.github.dmatthan.omairplay showArtwork false
-omarchy bar set io.github.dmatthan.omairplay refreshIntervalSec 5
-omarchy bar move io.github.dmatthan.omairplay --section right
 ```
 
 ## If the speaker appears but won't play

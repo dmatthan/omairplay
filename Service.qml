@@ -184,11 +184,7 @@ Item {
     return (wanted === "" ? "Omarchy Speaker" : wanted).substring(0, 50)
   }
   readonly property bool trackNotifications: setting("trackNotifications", true) !== false
-  readonly property int refreshIntervalSec: {
-    var n = parseInt(String(setting("refreshIntervalSec", 5)), 10)
-    if (!isFinite(n)) n = 5
-    return Math.max(2, Math.min(60, n))
-  }
+  readonly property int refreshIntervalSec: 5
 
   // ------------------------------------------------------------------ state
   property bool probed: false

@@ -22,7 +22,6 @@
     "defaultSection": "right",
     "defaults": {
       "speakerName": "Omarchy Speaker",
-      "refreshIntervalSec": 5,
       "showArtwork": true,
       "trackNotifications": true
     },
@@ -32,15 +31,6 @@
         "type": "string",
         "label": "Speaker name",
         "defaultValue": "Omarchy Speaker"
-      },
-      {
-        "key": "refreshIntervalSec",
-        "type": "integer",
-        "label": "Status refresh interval (seconds)",
-        "min": 2,
-        "max": 60,
-        "step": 1,
-        "defaultValue": 5
       },
       {
         "key": "showArtwork",

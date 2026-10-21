@@ -38,7 +38,7 @@ Panel {
   Binding {
     target: root.svc
     property: "settings"
-    value: root.settings
+    value: root.effectiveSettings
     when: root.svc !== null
   }
 
@@ -49,7 +49,8 @@ Panel {
   readonly property color hoverFill: bar ? Style.hoverFillFor(bar.foreground, Color.accent) : "transparent"
 
   readonly property string receiverState: svc ? svc.receiverState : "off"
-  readonly property bool showArtwork: setting("showArtwork", true) !== false
+  readonly property bool showArtwork: effectiveSettings.showArtwork !== false
+  readonly property bool trackNotifications: effectiveSettings.trackNotifications !== false
   readonly property bool playingShown: svc !== null && svc.setupComplete
                                        && svc.effectiveRunning && svc.playing
 
@@ -107,6 +108,8 @@ Panel {
     r.push("power")
     r.push("login")
     r.push("name")
+    r.push("notify")
+    r.push("artwork")
     if (svc.configStale && svc.running) r.push("restart")
     if (!svc.firewallOk) r.push("firewall")
     r.push("repair")
@@ -133,6 +136,8 @@ Panel {
       case "power":    svc.toggle(); break
       case "login":    svc.setStartAtLogin(!svc.startAtLogin); break
       case "name":     nameField.forceActiveFocus(); nameField.selectAll(); break
+      case "notify":   toggleSetting("trackNotifications"); break
+      case "artwork":  toggleSetting("showArtwork"); break
       case "restart":  svc.restart(); break
       case "firewall": root.repair(); break
       case "repair":   root.repair(); break
@@ -172,26 +177,53 @@ Panel {
     if (!svc) return
     var wanted = nameDraft.trim().substring(0, 50)
     if (wanted === "") return
-    // Persist into our own shell.json entry, or the new name is forgotten the
-    // moment the widget reloads. updateEntryInline is scoped to our own id by
-    // the host (shell.qml _updateSettings -> pluginOwnsTarget), which is all
-    // we need. Without this the field reverted on reopen.
-    //
-    // Send every setting, not just the changed one: updateEntryInline
-    // *replaces* the entry with {id} plus exactly the keys it is given
-    // (shell.qml:1092), so passing only speakerName would quietly drop
-    // refreshIntervalSec and showArtwork back to their defaults.
-    if (bar && bar.shell) {
-      var merged = {}
-      for (var key in root.settings)
-        if (key !== "id") merged[key] = root.settings[key]
-      merged.speakerName = wanted
-      bar.shell.updateEntryInline(root.moduleName, merged)
-    }
+    saveSettings({ speakerName: wanted })
     // And hand it to the service directly rather than waiting for that write
     // to come back round through the config reload -- otherwise the config
     // gets rewritten with the previous name.
     svc.applyName(wanted, true)
+  }
+
+  // ------------------------------------------------------------- settings
+  //
+  // Persisted in our own shell.json entry (updateEntryInline is scoped to our
+  // id by the host). It *replaces* the entry with exactly the keys given
+  // (shell.qml:1092), so every write sends the full set; keys no longer used
+  // fall away. The written value only returns after a reload, so it is held
+  // here until `settings` agrees -- otherwise a toggle flicks back.
+  readonly property var knownSettings: ["speakerName", "showArtwork", "trackNotifications"]
+  property var _pendingSettings: ({})
+
+  readonly property var effectiveSettings: {
+    var out = {}
+    for (var key in settings) out[key] = settings[key]
+    for (var p in _pendingSettings) out[p] = _pendingSettings[p]
+    return out
+  }
+
+  onSettingsChanged: {
+    var left = {}
+    for (var key in _pendingSettings)
+      if (!settings || settings[key] !== _pendingSettings[key]) left[key] = _pendingSettings[key]
+    _pendingSettings = left
+  }
+
+  function saveSettings(patch) {
+    var pending = {}
+    for (var p in _pendingSettings) pending[p] = _pendingSettings[p]
+    for (var k in patch) pending[k] = patch[k]
+    _pendingSettings = pending
+    if (!bar || !bar.shell) return
+    var merged = {}
+    for (var i = 0; i < knownSettings.length; i++) {
+      var key = knownSettings[i]
+      if (effectiveSettings[key] !== undefined) merged[key] = effectiveSettings[key]
+    }
+    bar.shell.updateEntryInline(root.moduleName, merged)
+  }
+
+  function toggleSetting(name) {
+    saveSettings({ [name]: effectiveSettings[name] === false })
   }
 
   onOpenedChanged: {
@@ -613,6 +645,35 @@ Panel {
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
+            }
+
+            PanelSectionHeader {
+              width: parent.width
+              text: "Now playing"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Toggle {
+              width: parent.width
+              label: "Track notifications"
+              description: "Announce each new song"
+              checked: root.trackNotifications
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              hasCursor: root.hasCursor("notify")
+              onClicked: root.toggleSetting("trackNotifications")
+            }
+
+            Toggle {
+              width: parent.width
+              label: "Cover art"
+              description: "Show the cover in this popup"
+              checked: root.showArtwork
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              hasCursor: root.hasCursor("artwork")
+              onClicked: root.toggleSetting("showArtwork")
             }
 
             PanelSeparator { width: parent.width; foreground: root.foreground }
