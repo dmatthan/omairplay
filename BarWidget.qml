@@ -106,16 +106,32 @@ Panel {
       return r
     }
     r.push("power")
-    r.push("login")
-    r.push("name")
-    r.push("notify")
-    r.push("artwork")
+    if (firewallAlert) r.push("fixFirewall")
+    if (healthAlert) r.push("fixHealth")
     if (svc.configStale && svc.running) r.push("restart")
-    if (!svc.firewallOk) r.push("firewall")
-    r.push("repair")
-    r.push("remove")
+    r.push("settings")
+    if (settingsOpen) {
+      r.push("login")
+      r.push("name")
+      r.push("notify")
+      r.push("artwork")
+      r.push("repair")
+      r.push("remove")
+    }
     return r
   }
+
+  // Settings start collapsed each time the popup opens.
+  property bool settingsOpen: false
+
+  function toggleSettings() {
+    settingsOpen = !settingsOpen
+    if (settingsOpen && cursorActive) cursorIndex = rows.indexOf("login")
+  }
+
+  readonly property bool firewallAlert: svc !== null && svc.setupComplete && !svc.firewallOk
+  readonly property bool healthAlert: svc !== null && svc.setupComplete && svc.firewallOk
+                                      && (svc.clockSyncDown || svc.notListening || svc.audioStalled)
 
   readonly property string cursorRow: {
     if (!cursorActive || rows.length === 0) return ""
@@ -134,12 +150,14 @@ Panel {
     switch (cursorRow) {
       case "setup":    svc.runSetup(true); root.close(); break
       case "power":    svc.toggle(); break
+      case "fixFirewall":
+      case "fixHealth": root.repair(); break
+      case "settings": toggleSettings(); break
       case "login":    svc.setStartAtLogin(!svc.startAtLogin); break
       case "name":     nameField.forceActiveFocus(); nameField.selectAll(); break
       case "notify":   toggleSetting("trackNotifications"); break
       case "artwork":  toggleSetting("showArtwork"); break
       case "restart":  svc.restart(); break
-      case "firewall": root.repair(); break
       case "repair":   root.repair(); break
       case "remove":   removeConfirm.opened = true; break
     }
@@ -230,6 +248,7 @@ Panel {
     if (opened) {
       cursorActive = false
       cursorIndex = 0
+      settingsOpen = false
       var current = svc ? (svc.advertisedName || svc.speakerName) : ""
       nameDraft = current
       nameField.text = current
@@ -400,17 +419,18 @@ Panel {
           }
 
           // A line for the states where there is nothing playing to show.
+          // Silent while an alert names the problem.
           Text {
             textFormat: Text.PlainText
             width: parent.width
-            visible: root.svc !== null && !root.playingShown
+            visible: root.svc !== null && !root.playingShown && text !== ""
             text: {
               if (!root.svc) return ""
               if (!root.svc.setupComplete) return "shairport-sync is not set up yet"
               if (root.svc.failed) return "The receiver could not start"
               if (root.svc.activating) return "Starting up"
               if (!root.svc.effectiveRunning) return "The receiver is off"
-              if (root.svc.needsRepair) return "The receiver needs repair"
+              if (root.svc.needsRepair) return ""
               return "Ready - waiting for a device"
             }
             color: root.dim
@@ -458,47 +478,45 @@ Panel {
           // changing underneath us.
           AlertRow {
             width: parent.width
-            visible: root.svc !== null && root.svc.setupComplete && !root.svc.firewallOk
+            visible: root.firewallAlert
             urgent: false
             foreground: root.foreground
             urgentColor: root.urgent
             fontFamily: root.fontFamily
+            actionText: "Repair"
+            hasCursor: root.hasCursor("fixFirewall")
+            onActionClicked: root.repair()
             text: {
               if (!root.svc) return ""
-              // Discovery passes through ufw but the connection does not, so
-              // the speaker shows up on the phone and then refuses to connect.
-              // Lead with the count when the checker has it: "3 rules missing"
-              // is more trustworthy than a generic sentence, and it tells the
-              // user the check actually ran. Point at Repair rather than at
-              // re-running setup, which has no action of its own in the popup.
+              // Discovery passes through ufw but the connection does not. Lead
+              // with the count when the checker has it: it shows the check ran.
               var n = root.svc.firewallMissing ? root.svc.firewallMissing.length : 0
               var lead = n > 0
-                ? (n + (n === 1 ? " firewall rule is" : " firewall rules are") + " missing for your current network. ")
+                ? (n + (n === 1 ? " firewall rule is" : " firewall rules are") + " missing on this network. ")
                 : ""
-              return lead + "Your phone may see this speaker but won't play through it. Press Repair below to fix it."
+              return lead + "Your phone sees the speaker but can't play to it."
             }
           }
 
-          // The receiver says it is up but one of the things it needs is not
-          // there. None of these can be fixed in place from the shell, so the
-          // row only points at Repair; the reason decides which sentence.
+          // Up, but something it needs is not. None of these can be fixed in
+          // place, so the action is Repair; the reason picks the sentence.
           AlertRow {
             width: parent.width
-            visible: root.svc !== null && root.svc.setupComplete
-                     && root.svc.firewallOk
-                     && (root.svc.clockSyncDown || root.svc.notListening
-                         || root.svc.audioStalled)
+            visible: root.healthAlert
             urgent: false
             foreground: root.foreground
             urgentColor: root.urgent
             fontFamily: root.fontFamily
+            actionText: "Repair"
+            hasCursor: root.hasCursor("fixHealth")
+            onActionClicked: root.repair()
             text: {
               if (!root.svc) return ""
               if (root.svc.clockSyncDown)
-                return "The clock-sync service AirPlay 2 needs is not running. Press Repair below to fix it."
+                return "The clock-sync service AirPlay 2 needs is not running."
               if (root.svc.notListening)
-                return "The receiver is running but not accepting connections. Press Repair below to fix it."
-              return "The track is showing but no audio is reaching this machine. Press Repair below to fix it."
+                return "The receiver is running but not accepting connections."
+              return "The track is showing but no audio is reaching this machine."
             }
           }
 
@@ -575,19 +593,22 @@ Panel {
           }
 
           // ------------------------------------------------------- settings
+          SettingsRow {
+            width: parent.width
+            visible: root.svc !== null && root.svc.setupComplete
+            expanded: root.settingsOpen
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            hasCursor: root.hasCursor("settings")
+            onClicked: root.toggleSettings()
+          }
+
           Column {
             width: parent.width
             spacing: Style.space(8)
-            visible: root.svc !== null && root.svc.setupComplete
-
-            PanelSeparator { width: parent.width; foreground: root.foreground }
-
-            PanelSectionHeader {
-              width: parent.width
-              text: "Receiver"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
+            visible: root.svc !== null && root.svc.setupComplete && root.settingsOpen
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
 
             Toggle {
               width: parent.width
@@ -647,13 +668,6 @@ Panel {
               font.pixelSize: Style.font.caption
             }
 
-            PanelSectionHeader {
-              width: parent.width
-              text: "Now playing"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
             Toggle {
               width: parent.width
               label: "Track notifications"
@@ -678,24 +692,7 @@ Panel {
 
             PanelSeparator { width: parent.width; foreground: root.foreground }
 
-            // What the popup deliberately does not have: play, pause and skip.
-            // shairport-sync claims CanPause and CanGoNext over MPRIS, but in
-            // AirPlay 2 mode they do nothing at all -- see NOTES.md. Controls
-            // belong on the phone, so say so once instead of drawing buttons
-            // that lie.
-            Text {
-              textFormat: Text.PlainText
-              width: parent.width
-              wrapMode: Text.WordWrap
-              text: "Use your phone to play, pause and skip."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            // Repair and removal share one row, so the extra action costs no
-            // height. Repair is the front door for everything the popup cannot
-            // fix in place; removal stays the deliberate, destructive one.
+            // Repair also sits on any alert it fixes; Uninstall lives only here.
             Row {
               width: parent.width
               spacing: Style.space(8)

@@ -1,22 +1,28 @@
 import QtQuick
 import qs.Commons
+import qs.Ui
 
-// A single wrapped warning line inside the popup. Two of these carry the
-// problems that would otherwise make the plugin look broken for no visible
-// reason: another shairport-sync holding the AirPlay 2 slot, and the firewall
-// letting discovery through while blocking the connection.
+// A wrapped warning inside the popup, optionally with the action that fixes
+// it on the right, so the fix sits where the problem is named.
 Item {
   id: root
 
   property string text: ""
   property bool urgent: false
+  property string actionText: ""
+  property bool hasCursor: false
   property color foreground: Color.foreground
   property color urgentColor: Color.urgent
   property string fontFamily: Style.font.family
 
-  readonly property color tint: urgent ? urgentColor : Qt.darker(foreground, 1.25)
+  signal actionClicked()
 
-  implicitHeight: visible ? body.implicitHeight + Style.space(12) : 0
+  readonly property color tint: urgent ? urgentColor : Qt.darker(foreground, 1.25)
+  readonly property int pad: Style.space(8)
+
+  implicitHeight: visible
+    ? Math.max(body.implicitHeight, action.visible ? action.implicitHeight : 0) + 2 * pad
+    : 0
 
   Rectangle {
     anchors.fill: parent
@@ -28,16 +34,28 @@ Item {
 
   Text {
     id: body
-    textFormat: Text.PlainText
-    anchors.left: parent.left
-    anchors.right: parent.right
+    x: root.pad
+    width: parent.width - 2 * root.pad - (action.visible ? action.width + root.pad : 0)
     anchors.verticalCenter: parent.verticalCenter
-    anchors.leftMargin: Style.space(8)
-    anchors.rightMargin: Style.space(8)
+    textFormat: Text.PlainText
     text: root.text
     color: root.tint
     wrapMode: Text.WordWrap
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
+  }
+
+  Button {
+    id: action
+    visible: root.actionText !== ""
+    anchors.right: parent.right
+    anchors.rightMargin: root.pad
+    anchors.verticalCenter: parent.verticalCenter
+    text: root.actionText
+    bordered: true
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    hasCursor: root.hasCursor
+    onClicked: root.actionClicked()
   }
 }
