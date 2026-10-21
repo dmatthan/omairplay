@@ -26,6 +26,9 @@ Item {
 
   implicitHeight: visible ? artSize : 0
 
+  readonly property string coverUrl: svc ? svc.coverArtUrl : ""
+  onCoverUrlChanged: if (coverUrl === "") { fadeIn.stop(); over.opacity = 0; under.source = "" }
+
   // Cover tile. The rebuilt copy only (Service.coverArtUrl); a glyph while
   // there is none, so the layout does not jump.
   Rectangle {
@@ -39,22 +42,44 @@ Item {
     border.color: Util.alpha(root.foreground, 0.10)
     clip: true
 
+    // The shown cover sits underneath; a new one loads on top and fades in
+    // once ready, so a change never passes through an empty tile.
     Image {
-      id: art
+      id: under
       anchors.fill: parent
       anchors.margins: 1
-      source: root.svc ? root.svc.coverArtUrl : ""
       fillMode: Image.PreserveAspectCrop
       asynchronous: true
       cache: false
       smooth: true
-      opacity: status === Image.Ready ? 1 : 0
-      Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutQuad } }
+    }
+
+    Image {
+      id: over
+      anchors.fill: parent
+      anchors.margins: 1
+      source: root.coverUrl
+      fillMode: Image.PreserveAspectCrop
+      asynchronous: true
+      cache: false
+      smooth: true
+      opacity: 0
+      onStatusChanged: if (status === Image.Ready) { opacity = 0; fadeIn.restart() }
+    }
+
+    NumberAnimation {
+      id: fadeIn
+      target: over
+      property: "opacity"
+      to: 1
+      duration: 220
+      easing.type: Easing.OutQuad
+      onFinished: under.source = over.source
     }
 
     Text {
       anchors.centerIn: parent
-      visible: art.status !== Image.Ready
+      visible: over.status !== Image.Ready && under.status !== Image.Ready
       textFormat: Text.PlainText
       text: "󰝚"  // U+F075A md-music
       color: Util.alpha(root.foreground, 0.35)
@@ -77,42 +102,43 @@ Item {
       y: meter.visible ? 0 : Math.round((parent.height - height) / 2)
 
       // Track text is the sender's: PlainText, so markup is never parsed.
-      Text {
+      // Long lines scroll rather than cut off.
+      Marquee {
         width: parent.width
-        textFormat: Text.PlainText
-        text: root.title
-        elide: Text.ElideRight
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
+        running: root.meterActive
+
+        Text {
+          textFormat: Text.PlainText
+          text: root.title
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
+        }
       }
 
       Item {
         width: parent.width
-        height: artistText.implicitHeight
+        height: volumeRow.implicitHeight
         visible: root.artist !== "" || root.album !== "" || volumeRow.visible
 
-        Row {
-          spacing: Style.space(6)
-          readonly property real room: parent.width - (volumeRow.visible ? volumeRow.width + Style.space(8) : 0)
+        // Artist and album, scrolling like the title.
+        Marquee {
+          width: parent.width - (volumeRow.visible ? volumeRow.width + Style.space(8) : 0)
+          running: root.meterActive
 
           Text {
-            id: artistText
             textFormat: Text.PlainText
             text: root.artist
             visible: text !== ""
-            width: Math.min(implicitWidth, parent.room)
-            elide: Text.ElideRight
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
 
           Text {
-            id: pipe
             textFormat: Text.PlainText
-            text: "|"
+            text: "  |  "
             visible: root.artist !== "" && root.album !== ""
             color: Util.alpha(root.foreground, 0.25)
             font.family: root.fontFamily
@@ -123,10 +149,6 @@ Item {
             textFormat: Text.PlainText
             text: root.album
             visible: text !== ""
-            width: Math.max(0, Math.min(implicitWidth, parent.room
-                   - (artistText.visible ? artistText.width + parent.spacing : 0)
-                   - (pipe.visible ? pipe.width + parent.spacing : 0)))
-            elide: Text.ElideRight
             color: root.dimmer
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

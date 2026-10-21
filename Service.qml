@@ -227,12 +227,36 @@ Item {
 
   onArtUrlChanged: refreshCoverArt()
 
+  Timer {
+    id: coverClearTimer
+    interval: 3000
+    onTriggered: if (root.artUrl === "") {
+      coverSettleTimer.stop()
+      root.coverArt = ""
+      root._coverArtFor = ""
+    }
+  }
+
+  // A phone may send a placeholder cover just before the real one, so a new
+  // cover waits a moment before it is shown.
+  property string _coverCandidate: ""
+  Timer {
+    id: coverSettleTimer
+    interval: 800
+    onTriggered: root.coverArt = root._coverCandidate
+  }
+
   // Whether the cover for the current art is still to come.
-  readonly property bool coverArtPending: coverProcess.running
+  readonly property bool coverArtPending: coverProcess.running || coverSettleTimer.running
     || (artUrl !== "" && _coverArtFor !== artUrl)
 
   function refreshCoverArt() {
-    if (artUrl === "") { coverArt = ""; return }
+    // shairport-sync blanks the art URL for a moment and resends it, in bursts
+    // around a track change and now and then mid-track. Clear the cover only
+    // if it stays blank, and never rebuild the one already shown.
+    if (artUrl === "") { coverClearTimer.restart(); return }
+    coverClearTimer.stop()
+    if (artUrl === _coverArtFor && !coverProcess.running) return
     // One rebuild at a time; onExited starts the next if the art moved on.
     if (coverProcess.running) return
     _coverArtFor = artUrl
@@ -639,16 +663,18 @@ Item {
     onExited: function(exitCode) {
       var capped = root._coverCapped
       root._coverCapped = false
-      if (root._coverArtFor !== root.artUrl) {
+      // A blank URL is not a new one: it is usually resent a moment later.
+      if (root.artUrl !== "" && root._coverArtFor !== root.artUrl) {
         Qt.callLater(root.refreshCoverArt)
         return
       }
       // Only ever a copy in the helper's own directory, named as it names them.
       // Refused art clears the cover rather than leave the last track's up.
       var path = String(coverOut.text || "").trim()
-      root.coverArt = !capped && exitCode === 0
+      root._coverCandidate = !capped && exitCode === 0
           && /^\/.*\/\.cache\/shairport-sync\/omairplay-art\/cover-[0-9a-f]{32}\.(png|jpg)$/.test(path)
         ? path : ""
+      coverSettleTimer.restart()
     }
   }
 
