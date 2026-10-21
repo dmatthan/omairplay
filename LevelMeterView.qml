@@ -147,29 +147,52 @@ Item {
     height: root.height
     clip: true
 
-    Repeater {
-      model: root.barCount + 1
+    // The bars sit still in this strip; only the strip moves each frame.
+    Item {
+      x: -root.offsetPx / root.dpr
+      width: parent.width + root.pitchPx / root.dpr
+      height: parent.height
 
-      Item {
-        id: slot
-        readonly property real v: root.levels[index] || 0
-        readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * v))
-        readonly property color colour: root.colourFor(v)
+      Repeater {
+        model: root.barCount + 1
 
-        x: (index * root.pitchPx - root.offsetPx) / root.dpr
-        width: root.barPx / root.dpr
-        height: root.height
-        opacity: 0.4 + 0.6 * (index / root.barCount)
+        Item {
+          id: slot
+          readonly property real v: root.levels[index] || 0
+          readonly property int px: Math.max(root.restPx, Math.round(root.halfPx * v))
+          readonly property color colour: root.colourFor(v)
 
-        // Rounded themes get a stepped tip instead of a blurry antialiased radius.
-        readonly property int tipPx: Style.cornerRadius > 0 && px >= 3 * root.tipStepPx ? root.tipStepPx : 0
+          x: index * root.pitchPx / root.dpr
+          width: root.barPx / root.dpr
+          height: root.height
+          opacity: 0.4 + 0.6 * (index / root.barCount)
 
-        Repeater {
-          model: [root.halfPx - slot.px, root.halfPx + root.centrePx]
+          // Rounded themes get a stepped tip instead of a blurry antialiased radius.
+          readonly property int tipPx: Style.cornerRadius > 0 && px >= 3 * root.tipStepPx ? root.tipStepPx : 0
+
+          // Fixed items: a Repeater over the two halves rebuilt them every sample.
+          Item {
+            y: (root.halfPx - slot.px) / root.dpr
+            width: parent.width
+            height: slot.px / root.dpr
+
+            Rectangle {
+              x: slot.tipPx / root.dpr
+              width: (root.barPx - 2 * slot.tipPx) / root.dpr
+              height: parent.height
+              color: slot.colour
+            }
+
+            Rectangle {
+              y: slot.tipPx / root.dpr
+              width: parent.width
+              height: (slot.px - 2 * slot.tipPx) / root.dpr
+              color: slot.colour
+            }
+          }
 
           Item {
-            required property int modelData
-            y: modelData / root.dpr
+            y: (root.halfPx + root.centrePx) / root.dpr
             width: parent.width
             height: slot.px / root.dpr
 
