@@ -1,15 +1,17 @@
 import QtQuick
 import QtQuick.Window
 import qs.Commons
+import qs.Commons as Commons
 
 // Level history mirrored about a centre line, newest on the right. Asks for a
 // sample via sampleNeeded() each time it scrolls one bar. Amplitude only.
 Item {
   id: root
 
-  property color foreground: Color.foreground
-  property color accent: Color.accent
-  property color muted: Color.muted
+  // Qualified: with QtQuick.Window imported, a bare `Color` is QtQuick's helper.
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
+  property color muted: Commons.Color.muted
   property bool running: false
 
   signal sampleNeeded()
