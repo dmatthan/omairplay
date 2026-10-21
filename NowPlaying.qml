@@ -138,7 +138,7 @@ Item {
 
           Text {
             textFormat: Text.PlainText
-            text: "  |  "
+            text: " | "
             visible: root.artist !== "" && root.album !== ""
             color: Util.alpha(root.foreground, 0.25)
             font.family: root.fontFamily
