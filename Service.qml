@@ -327,7 +327,7 @@ Item {
     var sub = []
     if (artist !== "") sub.push(artist)
     if (album !== "" && album !== title) sub.push(album)
-    args.push(escapeMarkup(sub.join("  \u00b7  ")))
+    args.push(escapeMarkup(sub.join(" | ")))
 
     Quickshell.execDetached({
       command: args,
