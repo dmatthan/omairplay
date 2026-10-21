@@ -132,8 +132,8 @@ Omarchy plugins run unsandboxed with your user's permissions, this one included:
   that tag.
 - Only use the receiver on networks you trust: on public WiFi, someone else might
   be able to cast to your device. This is a limitation upstream.
-- All metadata is removed from the files (etc. cover art, artist name) that the
-  casting device sends, so that your computer is safe from malicious attachments.
+- Cover art from the casting device is rebuilt from its image data with all
+  metadata removed, so a malicious image never reaches the shell.
 - Track titles, artists, albums and the sending device's name are shown as
   plain text, length-capped, so markup in them is never interpreted or fetched.
 - Commands are called by full path, in an environment the scripts build
