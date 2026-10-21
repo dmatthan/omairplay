@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Single-line speaker-name field that never reads the clipboard.
@@ -16,8 +17,8 @@ FocusScope {
   // Counted in UTF-16 units, as TextInput's maximumLength was.
   property int maximumLength: 50
   property string fontFamily: Style.font.family
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property bool hasCursor: false
 
   // Keys the panel acts on, accepted here so none reaches the editor.

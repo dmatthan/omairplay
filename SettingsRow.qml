@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The row that opens and closes the popup's settings. The chevron turns down
@@ -9,7 +10,7 @@ Item {
 
   property bool expanded: false
   property bool hasCursor: false
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
 
   signal clicked()

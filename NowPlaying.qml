@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // What the phone is playing: cover, title, artist | album and the sender's
 // volume, with the level meter filling the space beside the cover so the
@@ -10,8 +11,8 @@ Item {
   property var svc: null
   property bool showArtwork: true
   property bool meterActive: false
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
 
   readonly property color dim: Qt.darker(foreground, 1.25)

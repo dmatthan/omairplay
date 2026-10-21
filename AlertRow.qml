@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // A wrapped warning inside the popup, optionally with the action that fixes
@@ -11,8 +12,8 @@ Item {
   property bool urgent: false
   property string actionText: ""
   property bool hasCursor: false
-  property color foreground: Color.foreground
-  property color urgentColor: Color.urgent
+  property color foreground: Commons.Color.foreground
+  property color urgentColor: Commons.Color.urgent
   property string fontFamily: Style.font.family
 
   signal actionClicked()

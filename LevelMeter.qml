@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Services.Pipewire
 import qs.Commons
+import qs.Commons as Commons
 
 // Feeds LevelMeterView from the receiver's own PipeWire stream, only while the
 // popup is open. Hidden, not drawn flat, while there are no levels to give.
@@ -8,8 +9,8 @@ Item {
   id: root
 
   property bool active: false
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
 
   // The receiver's stream, from Service.qml; null while it is not streaming.
   property var streamNode: null
