@@ -309,6 +309,8 @@ Item {
   // Short: PanelHero renders it in small caps and elides it.
   readonly property string statusText: {
     if (actionLabel !== "") return actionLabel + "\u2026"
+    // Not "Needs repair": Repair cannot free a slot another receiver holds.
+    if (conflicting) return "Another receiver running"
     if (needsRepair) return "Needs repair"
     switch (receiverState) {
       case "missing":  return "Not set up"

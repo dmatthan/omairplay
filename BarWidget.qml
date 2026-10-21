@@ -58,6 +58,7 @@ Panel {
   readonly property string tooltipText: {
     if (!svc) return "AirPlay"
     if (!svc.setupComplete) return "AirPlay: not set up"
+    if (svc.conflicting) return "AirPlay: another receiver is running"
     if (svc.failed) return "AirPlay: could not start"
     if (svc.activating) return "AirPlay: starting"
     if (svc.actionLabel !== "") return "AirPlay: " + svc.actionLabel.toLowerCase()
@@ -260,7 +261,7 @@ Panel {
     // Dim when off or not set up; urgent on failure or anything Repair fixes.
     foreground: (root.receiverState === "playing" || root.receiverState === "idle")
       ? barForeground : Qt.darker(barForeground, 1.55)
-    active: root.svc !== null && (root.svc.failed || root.svc.needsRepair)
+    active: root.svc !== null && (root.svc.failed || root.svc.needsRepair || root.svc.conflicting)
     // WidgetButton shows and hides the tooltip itself from this property.
     tooltipText: root.tooltipText
     onPressed: function(buttonCode) {
@@ -345,7 +346,7 @@ Panel {
                 textFormat: Text.PlainText
                 text: root.icon
                 color: (root.receiverState === "failed"
-                        || (root.svc && root.svc.needsRepair))
+                        || (root.svc && (root.svc.needsRepair || root.svc.conflicting)))
                   ? root.urgent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.display
