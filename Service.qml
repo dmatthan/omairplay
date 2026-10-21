@@ -256,7 +256,7 @@ Item {
 
   // Whether the cover for the current art is still to come.
   readonly property bool coverArtPending: coverProcess.running || coverSettleTimer.running
-    || (artUrl !== "" && _coverArtFor !== artUrl)
+    || coverClearTimer.running || (artUrl !== "" && _coverArtFor !== artUrl)
 
   function refreshCoverArt() {
     // shairport-sync blanks the art URL for a moment and resends it, in bursts
@@ -712,6 +712,8 @@ Item {
         Qt.callLater(root.refreshCoverArt)
         return
       }
+      // The blank outlasted the rebuild and the cover was cleared: too late.
+      if (root._coverArtFor === "") return
       // Only ever a copy in the helper's own directory, named as it names them.
       // Refused art clears the cover rather than leave the last track's up.
       var path = String(coverOut.text || "").trim()
