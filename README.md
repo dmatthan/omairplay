@@ -1,6 +1,6 @@
 # OmairPlay
 
-![OmairPlay](preview.png?v=5)
+![OmairPlay](preview.png?v=6)
 
 Turn your Omarchy machine into an AirPlay speaker. Tap to cast from your phone's
 AirPlay list, and the audio plays on your speakers or headphones. It's lightning-fast:
