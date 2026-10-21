@@ -474,7 +474,9 @@ Panel {
               foreground: root.foreground
               urgentColor: root.urgent
               fontFamily: root.fontFamily
-              text: "Your changes need a restart to take effect."
+              text: root.svc && root.svc.staleFromUpdate
+                ? "An update needs a restart to take effect."
+                : "Your changes need a restart to take effect."
             }
 
             Button {

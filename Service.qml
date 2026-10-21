@@ -141,6 +141,8 @@ Item {
   readonly property int configTemplate: 2
   property int configTemplateFound: configTemplate
   property bool _configMigrated: false
+  // Whether the pending restart is owed to that update rather than a rename.
+  property bool staleFromUpdate: false
 
   // Another shairport-sync (system or user unit) holding the one AirPlay 2 slot.
   property bool systemUnitBusy: false
@@ -499,6 +501,7 @@ Item {
   // the name directly, because speakerName lags a rename by a settings reload.
   function applyName(name, restartIfRunning) {
     if (busy) return
+    staleFromUpdate = false
     var wanted = String(name || "").trim().substring(0, 50)
     if (wanted === "") return
     // Two argv steps, not a shell string built around a typed name.
@@ -513,6 +516,7 @@ Item {
     if (busy || _configMigrated || !setupComplete) return
     var name = advertisedName !== "" ? advertisedName : speakerName
     _configMigrated = true
+    staleFromUpdate = true
     var steps = [[pluginDir + "/bin/airplay-write-config", "--name", name]]
     if (running && !playing)
       steps.push([binSystemctl, "--user", "restart", unit])
