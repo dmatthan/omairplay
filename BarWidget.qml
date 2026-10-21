@@ -4,37 +4,22 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 
-// Bar icon plus popup for the AirPlay receiver. Display and input only: every
-// piece of state and every action lives in Service.qml, so one receiver is
-// shared by however many monitors the bar is drawn on.
+// Bar icon and popup. Display and input only: state and actions live in
+// Service.qml, shared by every monitor's bar.
 Panel {
   id: root
   moduleName: "io.github.dmatthan.omairplay"
-  // Register our own IPC target so the popup is scriptable:
-  //   omarchy-shell io.github.dmatthan.omairplay toggle
-  // The host does not register one for a third-party bar widget, so unlike the
-  // first-party panels this keeps manageIpc at its default of true and lets
-  // Ui/Panel's own IpcHandler own the target.
+  // Scriptable: omarchy-shell io.github.dmatthan.omairplay open|close|toggle.
   ipcTarget: "io.github.dmatthan.omairplay"
 
-  // The bar sizes each slot from its item's implicit size
-  // (Bar.qml reads slot.activeItem.implicitWidth), and Ui/Panel is a plain
-  // Item with no implicit size of its own. Without these the widget loads
-  // cleanly, reports zero width, and is simply never visible -- which is
-  // exactly what happened the first time. Every first-party bar widget does
-  // the same thing.
+  // The bar sizes slots from the implicit size; Ui/Panel has none.
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  // Our own service. A third-party plugin gets a capability-scoped facade
-  // whose serviceFor() resolves only its own id (shell.qml pluginOwnsTarget),
-  // which is exactly what we need. firstPartyServiceFor() returns null for an
-  // ordinary third-party plugin, so omarchy.media's live data is off limits --
-  // Service.qml reads MPRIS itself instead.
+  // A third-party plugin can resolve only its own service.
   readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("io.github.dmatthan.omairplay") : null
 
-  // The host hands a bar widget its inline shell.json entry but hands a
-  // service nothing, so push ours down and let the service own the parsing.
+  // Services get no settings from the host, so push ours down.
   Binding {
     target: root.svc
     property: "settings"
@@ -54,11 +39,8 @@ Panel {
   readonly property bool playingShown: svc !== null && svc.setupComplete
                                        && svc.effectiveRunning && svc.playing
 
-  // Nerd Font glyphs, each confirmed present in JetBrainsMono Nerd Font by
-  // checking the font's charset with fc-query. Written as explicit UTF-16
-  // surrogate pairs rather than pasted literally: these live in a Private Use
-  // *plane* above U+FFFF, and a literal paste is easy to truncate silently
-  // into the wrong glyph. The comment carries the real codepoint.
+  // Nerd Font glyphs above U+FFFF, written as surrogate pairs so a paste cannot
+  // silently truncate them; each comment carries the codepoint.
   readonly property string iconPlaying: "\uDB80\uDD19"  // U+F0119 md-cast-connected
   readonly property string iconIdle:    "\uDB81\uDCC3"  // U+F04C3 md-speaker
   readonly property string iconOff:     "\uDB81\uDCC4"  // U+F04C4 md-speaker-off
@@ -67,8 +49,7 @@ Panel {
     switch (receiverState) {
       case "playing": return iconPlaying
       case "idle":    return iconIdle
-      // "starting" and "failed" both fall through to the off glyph: neither is
-      // usable yet, and claiming otherwise is how this was wrong before.
+      // "starting" and "failed" use the off glyph: neither is usable yet.
       default:        return iconOff
     }
   }
@@ -79,8 +60,7 @@ Panel {
     if (svc.failed) return "AirPlay: could not start"
     if (svc.activating) return "AirPlay: starting"
     if (svc.actionLabel !== "") return "AirPlay: " + svc.actionLabel.toLowerCase()
-    // Name the reason rather than "needs repair": the tooltip is the only
-    // diagnosis there is while the popup is shut.
+    // Name the reason: the tooltip is the only diagnosis while the popup is shut.
     if (!svc.firewallOk)
       return (svc.firewallMissing && svc.firewallMissing.length > 0)
         ? "AirPlay: firewall rules missing" : "AirPlay: firewall blocked"
@@ -163,9 +143,7 @@ Panel {
     }
   }
 
-  // Hand the keyboard back to the panel. The key catcher is blocked while the
-  // field has focus, so without this j/k keep typing into the field after
-  // Enter, and the rename confirmation cannot be answered from the keyboard.
+  // Hand the keyboard back to the panel, or j/k keep typing into the field.
   function leaveNameField() {
     var i = rows.indexOf("name")
     if (i >= 0) cursorIndex = i
@@ -179,10 +157,7 @@ Panel {
     nameField.text = current
   }
 
-  // Changing the name rewrites the config, and the receiver only reads its
-  // config at startup -- so a running receiver has to restart, which drops
-  // whatever is playing. Ask first in that case rather than doing it and
-  // explaining afterwards.
+  // A rename restarts a running receiver, so ask first if something plays.
   function submitName() {
     if (!svc) return
     var wanted = nameDraft.trim()
@@ -196,19 +171,15 @@ Panel {
     var wanted = nameDraft.trim().substring(0, 50)
     if (wanted === "") return
     saveSettings({ speakerName: wanted })
-    // And hand it to the service directly rather than waiting for that write
-    // to come back round through the config reload -- otherwise the config
-    // gets rewritten with the previous name.
+    // Hand it over directly: the persisted copy lags a settings reload.
     svc.applyName(wanted, true)
   }
 
   // ------------------------------------------------------------- settings
   //
-  // Persisted in our own shell.json entry (updateEntryInline is scoped to our
-  // id by the host). It *replaces* the entry with exactly the keys given
-  // (shell.qml:1092), so every write sends the full set; keys no longer used
-  // fall away. The written value only returns after a reload, so it is held
-  // here until `settings` agrees -- otherwise a toggle flicks back.
+  // updateEntryInline replaces our entry with exactly the keys given, so every
+  // write sends the full known set. A written value is held until the reload
+  // brings `settings` into agreement, or a toggle would flick back.
   readonly property var knownSettings: ["speakerName", "showArtwork", "trackNotifications"]
   property var _pendingSettings: ({})
 
@@ -256,8 +227,7 @@ Panel {
     }
   }
 
-  // Once a rename actually takes effect the receiver reports its new name, so
-  // follow it -- unless the field is being typed in right now.
+  // Follow a rename once it lands, unless the field is being typed in.
   Connections {
     target: root.svc
     function onAdvertisedNameChanged() {
@@ -269,10 +239,7 @@ Panel {
     }
   }
 
-  // Reverts and reinstalls the receiver, which is the fix for the states the
-  // popup cannot repair in place -- firewall rules for an address the machine
-  // no longer has, a wedged receiver, ownership of nqptp. It restarts the
-  // receiver as part of the round trip, so ask first when something is playing.
+  // Repair restarts the receiver, so ask first if something is playing.
   function repair() {
     if (!svc) return
     if (svc.playing) { repairConfirm.opened = true; return }
@@ -289,17 +256,14 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.icon
-    // Off, starting and not-set-up stay dim; playing and idle carry the normal
-    // colour. Failure, or anything only Repair can fix, is urgent. WidgetButton
-    // picks `activeColor` (the bar's urgent) over `foreground` when active.
+    // Dim when off or not set up; urgent on failure or anything Repair fixes.
     foreground: (root.receiverState === "playing" || root.receiverState === "idle")
       ? barForeground : Qt.darker(barForeground, 1.55)
     active: root.svc !== null && (root.svc.failed || root.svc.needsRepair)
     // WidgetButton shows and hides the tooltip itself from this property.
     tooltipText: root.tooltipText
     onPressed: function(buttonCode) {
-      // Right-click flips the receiver without opening anything, matching how
-      // the first-party network and bluetooth widgets behave.
+      // Right-click flips the receiver, like the network and bluetooth widgets.
       if (buttonCode === Qt.RightButton) {
         if (root.svc && root.svc.setupComplete) root.svc.toggle()
       } else {
@@ -316,16 +280,13 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(340))
-    // Was Style.space(560), which cut the bottom off and forced a small
-    // scroll for no good reason. fittedContentHeight still clamps to the space
-    // the bar actually leaves, so a taller cap costs nothing on a short screen.
+    // fittedContentHeight still clamps this to the space the bar leaves.
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(760))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      // While the name field has focus every letter belongs to it, or typing a
-      // speaker name would drive the cursor instead.
+      // While the name field has focus, every key belongs to it.
       blocked: nameField.activeFocus
 
       onMoveRequested: function(dx, dy) {
@@ -371,25 +332,13 @@ Panel {
             width: parent.width
             foreground: root.foreground
             fontFamily: root.fontFamily
-            // The speaker's own name stays the prominent line: it is the
-            // stable identity of the thing this popup controls, and it is what
-            // Daniel looks for on the phone. The track gets its own block
-            // below, where it can be long and wrap.
+            // The speaker's name stays the prominent line; the track has its own block.
             title: root.svc ? (root.svc.advertisedName || root.svc.speakerName) : "AirPlay"
             // Rendered in small caps by PanelHero, so a short label only.
             meta: root.svc ? root.svc.statusText : ""
-            // `detail` is a pill sharing one row with the title, so anything
-            // long here squeezes the title out entirely. Left empty.
+            // A pill sharing the title row, so anything here squeezes the title out.
             detail: ""
-            // A plain Text, not an OpticalGlyph. OpticalGlyph is an Item with
-            // no implicit size and its glyph is anchors.centerIn: parent, so
-            // used here it collapsed to 0x0 and drew the icon centred on a
-            // zero-size box -- which is why half of it was cut off. PanelHero
-            // sizes its icon slot from the component's implicit size, so the
-            // component has to have one. Text gets that from font metrics.
-            // (The bar button still benefits from OpticalGlyph's optical
-            // centring, where lining up with neighbouring glyphs matters;
-            // BarIconButton handles that itself.)
+            // A plain Text: OpticalGlyph has no implicit size and collapsed to 0x0.
             iconComponent: Component {
               Text {
                 textFormat: Text.PlainText
@@ -451,10 +400,6 @@ Panel {
           }
 
           // --------------------------------------------------------- alerts
-          //
-          // Safety rule 4: another shairport-sync holding the AirPlay 2 slot
-          // is the sort of thing that makes this plugin look broken, so name
-          // it instead of leaving Daniel to guess.
           AlertRow {
             width: parent.width
             visible: root.svc !== null && root.svc.conflicting
@@ -464,18 +409,15 @@ Panel {
             fontFamily: root.fontFamily
             text: {
               if (!root.svc) return ""
-              // Another shairport-sync is holding the one AirPlay slot this
-              // machine has. Name the fix; the reasoning lives in NOTES.md.
+              // Name the exact command that frees the slot.
               if (root.svc.systemUnitBusy)
                 return "Another AirPlay receiver is already running on this machine. Turn it off with:\n    sudo systemctl disable --now shairport-sync.service"
               return "Another AirPlay receiver is already running on this machine. Turn it off with:\n    systemctl --user disable --now shairport-sync.service"
             }
           }
 
-          // The firewall trap: discovery passes through ufw, so the phone sees
-          // the speaker and then cannot connect. This reads the real rules
-          // rather than a marker file, so it also catches the IPv6 prefix
-          // changing underneath us.
+          // Discovery passes through ufw but the connection does not, so the phone
+          // sees the speaker and then cannot connect.
           AlertRow {
             width: parent.width
             visible: root.firewallAlert
@@ -488,8 +430,7 @@ Panel {
             onActionClicked: root.repair()
             text: {
               if (!root.svc) return ""
-              // Discovery passes through ufw but the connection does not. Lead
-              // with the count when the checker has it: it shows the check ran.
+              // Lead with the count when known: it shows the check ran.
               var n = root.svc.firewallMissing ? root.svc.firewallMissing.length : 0
               var lead = n > 0
                 ? (n + (n === 1 ? " firewall rule is" : " firewall rules are") + " missing on this network. ")
@@ -498,8 +439,7 @@ Panel {
             }
           }
 
-          // Up, but something it needs is not. None of these can be fixed in
-          // place, so the action is Repair; the reason picks the sentence.
+          // Up, but something it needs is not; only Repair fixes these.
           AlertRow {
             width: parent.width
             visible: root.healthAlert
@@ -520,9 +460,7 @@ Panel {
             }
           }
 
-          // A config change that has not taken effect yet. This is the state
-          // that made renaming look broken: the popup said one name while the
-          // receiver kept broadcasting another.
+          // A config change that has not taken effect yet.
           Column {
             width: parent.width
             spacing: Style.space(6)
@@ -628,27 +566,20 @@ Panel {
               fontFamily: root.fontFamily
             }
 
-            // Not a TextField: that reads the clipboard on its own -- see
-            // NameField.qml.
+            // Not a TextField, which reads the clipboard: see NameField.qml.
             NameField {
               id: nameField
               width: parent.width
-              // Deliberately not bound to nameDraft: the value is seeded when
-              // the popup opens and after a rename lands, so that typing is
-              // never fighting a binding for the field's contents.
+              // Not bound to nameDraft: seeded on open, so typing never fights a binding.
               foreground: root.foreground
               placeholderText: "Omarchy Speaker"
-              // Follow the bar's font rather than the global default so themes
-              // carry through.
               fontFamily: root.fontFamily
               hasCursor: root.hasCursor("name")
-              // shairport-sync caps the advertised name at 50 characters, so
-              // stop at the limit rather than silently truncating later.
+              // shairport-sync caps the advertised name at 50 characters.
               maximumLength: 50
               onTextChanged: root.nameDraft = text
-              // The field accepts these keys itself, so the press that submits
-              // never reaches the panel, which would otherwise take it as
-              // confirming the rename dialog it just opened.
+              // The field takes these keys itself, so the submitting press cannot also
+              // confirm the dialog it opens.
               onSubmitted: { root.leaveNameField(); root.submitName() }
               onCancelled: { root.revertName(); root.leaveNameField() }
               onNavigated: function(delta) { root.leaveNameField(); root.moveCursor(delta) }

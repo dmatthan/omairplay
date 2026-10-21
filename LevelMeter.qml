@@ -2,15 +2,8 @@ import QtQuick
 import Quickshell.Services.Pipewire
 import qs.Commons
 
-// Feeds LevelMeterView from the receiver's own PipeWire stream.
-//
-// Gated on the popup being open: with `active` false the peak monitor is off,
-// the timer stops and the history clears, so nothing here costs anything while
-// the popup is shut. Service.qml does not know this exists.
-//
-// The strip is hidden, not drawn flat, while the monitor has no levels to give
-// -- see `_heardAudio`. Sampling carries on while it is hidden, or it could
-// never find out that levels came back.
+// Feeds LevelMeterView from the receiver's own PipeWire stream, only while the
+// popup is open. Hidden, not drawn flat, while there are no levels to give.
 Item {
   id: root
 
@@ -18,36 +11,23 @@ Item {
   property color foreground: Color.foreground
   property color accent: Color.accent
 
-  // Present only while the receiver is streaming: PipeWire creates the node
-  // when playback starts and drops it when it stops.
+  // Exists only while the receiver is streaming.
   readonly property var streamNode: findStream()
   readonly property bool live: active && streamNode !== null
 
-  // Whether the monitor has produced a level at all for this stream. Quickshell
-  // 0.3.1 publishes nothing for a node whose channel list is narrower than the
-  // stream it captured -- it logs "missing channels present in capture stream"
-  // and returns before updatePeaks (peak.cpp:295-300), which is what a stereo
-  // stream the graph expanded into a multi-channel sink triggers.
-  //
-  // Values, not rate: peaksChanged fires only on change, so a silent passage
-  // stops reporting too, and a "nothing lately" test would hide the strip
-  // mid-song. Re-armed on renegotiation, so the strip comes back by itself once
-  // the graph is meterable -- upstream fix (quickshell-mirror/quickshell#1147)
-  // or a move to a stereo output.
+  // Whether the monitor has produced any level for this stream: Quickshell 0.3.1
+  // reports nothing for a stream upmixed into a wider sink (quickshell#1147).
+  // Judged on values, since a silent passage stops reports too.
   property bool _heardAudio: false
   readonly property bool delivering: live && _heardAudio
 
-  // A hidden row costs no space in the popup's Column, the way AlertRow's
-  // does; collapsing both ways keeps the panel sized to what it shows.
   implicitHeight: visible ? view.implicitHeight : 0
   visible: delivering
   opacity: delivering ? 1 : 0
   Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
 
-  // Match on anything that identifies shairport-sync, because which field
-  // carries the name depends on how the stream was created. Required: this
-  // machine has other playback streams (EQ and surround sinks) that must not
-  // drive the meter.
+  // Which field names shairport-sync depends on how the stream was created;
+  // other playback streams must not drive the meter.
   function looksLikeOurs(node) {
     var candidates = [node.name, node.nickname, node.description]
     var props = node.properties
@@ -79,9 +59,7 @@ Item {
   // Without this the node's properties are not kept live.
   PwObjectTracker { objects: root.streamNode ? [root.streamNode] : [] }
 
-  // The average peak since the last bar, both channels together. The mean
-  // follows vocal and arrangement changes markedly better than the maximum,
-  // which short drum transients dominate.
+  // Mean peak since the last bar: it follows vocals better than the maximum.
   property real _sum: 0
   property int _count: 0
   property real _last: 0
@@ -90,9 +68,7 @@ Item {
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0
   }
 
-  // Any channel, not only the first two: a virtual sink can carry the audio
-  // somewhere other than front left and right, and a level anywhere means the
-  // monitor is working.
+  // Any channel: a virtual sink can carry the audio outside front left/right.
   function anyPeak(list) {
     for (var i = 0; i < list.length; i++) if (list[i] > 0) return true
     return false
@@ -122,8 +98,7 @@ Item {
     running: root.live
     foreground: root.foreground
     accent: root.accent
-    // No report since the last bar: repeat the last value rather than draw a
-    // gap that was never in the audio.
+    // No report since the last bar: repeat the last value, never draw a gap.
     onSampleNeeded: {
       if (root._count > 0) root._last = root._sum / root._count
       view.push(root._last)

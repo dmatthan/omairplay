@@ -3,11 +3,7 @@ import QtQuick.Window
 import qs.Commons
 
 // Level history mirrored about a centre line, newest on the right. Asks for a
-// sample through sampleNeeded() each time it has scrolled one bar, and draws
-// what push(level) gives it.
-//
-// Amplitude only. There is no frequency data to draw a spectrum from, so this
-// shows what the level is actually doing rather than inventing bands.
+// sample via sampleNeeded() each time it scrolls one bar. Amplitude only.
 Item {
   id: root
 
@@ -18,16 +14,9 @@ Item {
 
   signal sampleNeeded()
 
-  // Geometry is worked out in physical pixels, then divided back into logical
-  // ones. Anything fractional in physical pixels -- which fractional monitor
-  // scaling and the shell's UI scale both produce -- makes bars straddle the
-  // pixel grid unevenly: wider ones form light bands, and a scroll that moves a
-  // non-whole number of pixels shimmers as every bar's antialiasing changes
-  // from frame to frame.
-  //
+  // Geometry in whole physical pixels, or bars straddle the grid and shimmer.
   // The window's ratio, not the screen's: under fractional scaling Screen
-  // reports the output's integer scale (2 at 1.25), and the bars flickered.
-  // Window.devicePixelRatio is Qt 6.11+; older Qt falls back.
+  // reports the integer scale. Window.devicePixelRatio is Qt 6.11+.
   readonly property real dpr: {
     var w = Window.window ? Window.window.devicePixelRatio : 0
     return Math.max(1, w > 0 ? w : Screen.devicePixelRatio)
@@ -43,17 +32,12 @@ Item {
   // A third of the bar, so the tip stays centred and in proportion at any scale.
   readonly property int tipStepPx: Math.floor(barPx / 3)
 
-  // Motion: a whole number of physical pixels, on a whole number of frames.
-  // Roughly a pixel per frame at 60 Hz; on a faster display the same step is
-  // taken every second or third frame, and on a dense display the step is
-  // larger, so the speed stays near 60 physical pixels a second everywhere and
-  // every move is identical. Anything much faster than half a bar's pitch per
-  // step and the regular pattern of bars strobes.
+  // A whole number of physical pixels on a whole number of frames, so every
+  // step is identical, at roughly 60 physical pixels a second on any display.
   readonly property int stepPx: Math.max(1, Math.round(dpr))
   property real _frameSeconds: 1 / 60
-  // 60 and 75 Hz step every frame, 120 and 144 Hz every second, 165 and above
-  // every third. Biased so the switch falls between common refresh rates rather
-  // than on one, where a jittery estimate would flip it back and forth.
+  // 60/75 Hz step every frame, 120/144 every second, 165+ every third; biased
+  // between common rates so a jittery estimate cannot flip it.
   readonly property int frameStride: Math.max(1, Math.floor((1 / _frameSeconds) / 60 + 0.25))
   readonly property real barSeconds: pitchPx / stepPx * frameStride * _frameSeconds
 
@@ -85,10 +69,7 @@ Item {
     return 20 * Math.log(Math.max(p, 1e-5)) / Math.LN10
   }
 
-  // Tuned against a recording of real AirPlay music, with vocal-band energy as
-  // the reference for what the meter should follow, at one bar every 1/12 s.
-  // The bar length depends on scale and refresh rate, so rates and the history
-  // length are converted to give the same time constants at the actual length.
+  // Time constants tuned at one bar per 1/12 s, converted to the real bar length.
   function rate(perReferenceBar) {
     return 1 - Math.pow(1 - perReferenceBar, barSeconds / (5 / 60))
   }
@@ -102,19 +83,10 @@ Item {
     return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo)
   }
 
-  // Height is the level placed within this song's own recent range: the 10th
-  // to 95th percentile of the last twenty seconds. A quieter verse sits lower
-  // than the chorus and a vocal that swells rises with it, which a measure of
-  // change against a short average cannot show -- it re-centres on each new
-  // level within a couple of seconds and flattens exactly those shifts.
-  //
-  // Percentiles rather than extremes, so one loud hit cannot pin the scale. A
-  // three dB minimum span, so a heavily limited master still moves instead of
-  // drawing a wall. Silence clears the range: each song is judged on its own.
-  //
-  // The bottom of the range sits at a quarter height, not at rest, and anything
-  // quieter compresses into the space below it, so a soft passage still ripples.
-  // Only silence rests.
+  // The level within this song's recent range (10th-95th percentile of the last
+  // 20 s), so a quiet verse sits below the chorus. At least 3 dB of span; the
+  // range bottom sits at a quarter height so soft passages still ripple; only
+  // silence rests.
   function levelFor(peak) {
     var x = toDb(peak)
     if (x < silenceDb) {
@@ -142,8 +114,7 @@ Item {
     levels = next
   }
 
-  // The high swings glow in the accent itself: lighter on a dark theme, deeper
-  // on a light one.
+  // High swings glow in the accent: lighter on dark themes, deeper on light.
   readonly property color glow: foreground.hslLightness < 0.5
     ? Qt.darker(accent, 1.6) : Qt.lighter(accent, 1.45)
 
@@ -153,9 +124,7 @@ Item {
     return g > 0 ? Qt.tint(c, Qt.rgba(glow.r, glow.g, glow.b, 0.75 * g)) : c
   }
 
-  // Driven by the frame clock rather than a timer, counting frames rather than
-  // accumulating time, so every step is the same size and lands on the same
-  // cadence. Frame time is only used to learn the refresh rate.
+  // Frame-counted rather than timed, so every step is the same size.
   FrameAnimation {
     running: root.running && root.barCount > 1
     onTriggered: {
@@ -190,9 +159,7 @@ Item {
         height: root.height
         opacity: 0.4 + 0.6 * (index / root.barCount)
 
-        // Rounded themes get a stepped tip at both ends of each bar, one pixel
-        // step in from each side, instead of a smoothed radius. At this size an
-        // antialiased curve is only a blur; whole pixels keep the ends crisp.
+        // Rounded themes get a stepped tip instead of a blurry antialiased radius.
         readonly property int tipPx: Style.cornerRadius > 0 && px >= 3 * root.tipStepPx ? root.tipStepPx : 0
 
         Repeater {

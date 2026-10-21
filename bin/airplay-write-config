@@ -1,41 +1,15 @@
 #!/bin/bash
-# Generate the whole shairport-sync config for the AirPlay receiver plugin.
-#
-# The plugin owns this file end to end and never parses hand edits: every run
-# rewrites it from the settings passed in. Changing it takes effect only when
-# the receiver restarts, so the caller decides when to do that.
-#
-# Runs entirely as the user. Touches nothing outside $HOME and needs no root.
+# Generate the whole shairport-sync config from the settings passed in. Never
+# parses hand edits; takes effect when the receiver restarts. User only.
 #
 # Usage: airplay-write-config [--name NAME] [--backend BACKEND] [--print] [--force]
 
 set -euo pipefail
 
-# Re-exec once with a closed environment.
-#
-# Pinning PATH was not enough. bash reads BASH_ENV for every non-interactive
-# script and sources it before the first line here runs, so a hostile value
-# executes arbitrary code in this shell -- including defining a function named
-# `sudo`, which would then shadow the real command in the privileged steps.
-# Unsetting it here cannot help: by then it has already been sourced. The only
-# fix is to start again in an environment we built ourselves.
-#
-# env -i drops everything; what follows is the complete allowlist. It closes
-# BASH_ENV and ENV (shell), PYTHONPATH and PYTHONHOME (our python3 helpers),
-# LD_PRELOAD and friends (every dynamically linked binary), and CDPATH, IFS and
-# GLOBIGNORE (word splitting and `cd`).
-#
-# The gate is a leading argument, not an environment variable: anything able to
-# set a variable could otherwise set the marker and skip the re-exec.
-#
-# HOME comes from the passwd database rather than the environment. The systemd
-# unit resolves its paths with %h, which is the passwd home, so taking it from
-# anywhere else let the two disagree -- a user with XDG_CONFIG_HOME set had the
-# config written where the receiver would never read it. XDG_* is deliberately
-# not carried through, so every path is the one the README documents.
-#
-# OMARCHY_PATH is set to the value the omarchy package itself hardcodes rather
-# than inherited, for the same reason PATH is not inherited.
+# Re-exec once in an environment built here: bash has already sourced BASH_ENV
+# by the first line, and LD_PRELOAD and friends reach every binary. The gate is
+# an argument, not a variable, so it cannot be set from outside. HOME comes
+# from passwd to match the unit's %h; XDG_* is never carried through.
 if [[ ${1:-} != --omairplay-sealed-env ]]; then
   _oa_user="$(/usr/bin/id -un)"
   _oa_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | /usr/bin/cut -d: -f6)"
@@ -70,9 +44,7 @@ CONFIG_FILE="$CONFIG_DIR/shairport-sync.conf"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shairport-sync"
 
 NAME="Omarchy Speaker"
-# "pulseaudio", not "pa": those are the names shairport-sync -h actually
-# prints. PipeWire output is experimental upstream, so we go through
-# pipewire-pulse instead, which is active on this machine.
+# The names `shairport-sync -h` prints. PipeWire goes through pipewire-pulse.
 BACKEND="pulseaudio"
 PRINT_ONLY="no"
 FORCE="no"
@@ -92,29 +64,15 @@ case "$BACKEND" in
   *) echo "airplay-write-config: refusing unknown backend '$BACKEND'" >&2; exit 2 ;;
 esac
 
-# libconfig strings take C-style escapes, so a name with a quote or a backslash
-# would otherwise break the file, or worse, inject a setting.
+# libconfig strings take C-style escapes; a quote must not end the string.
 escape_libconfig() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
-# The AirPlay name shows up in the iPhone's speaker list. Shairport Sync caps
-# the advertised name at 50 characters.
-# Strip control characters before anything else touches the name.
-#
-# escape_libconfig escapes backslashes and quotes, which is enough for the
-# characters libconfig cares about inside a string -- but not for a newline.
-# A name containing one ends the line early and whatever follows lands in the
-# config as directives:
-#
-#     name = "Evil\";
-#     port = 9999;          <- injected, inside the general block
-#
-# libconfig has sections that run commands (sessioncontrol's run_this_* hooks),
-# so arbitrary directives are worth more than a cosmetic bug. The popup caps
-# the name at 50 characters and trims it, but this file is also driven from the
-# persisted plugin settings and from the command line, so the guarantee belongs
-# here rather than in the caller.
+# Shown in the phone's speaker list; shairport-sync caps it at 50 characters.
+# Control characters first: a newline would end the string and let the rest
+# land as directives, and libconfig has hooks that run commands. Enforced here,
+# not in the caller, since settings and the command line reach this too.
 NAME="${NAME//[[:cntrl:]]/}"
 NAME="${NAME:0:50}"
 [[ -n ${NAME//[[:space:]]/} ]] || NAME="Omarchy Speaker"
@@ -134,37 +92,21 @@ general = {
   output_backend = "$BACKEND";
   mdns_backend = "avahi";
 
-  // MPRIS must be on the session bus, for two separate reasons:
-  //
-  //  1. /etc/dbus-1/system.d/shairport-sync-mpris.conf only lets the users
-  //     "shairport-sync" and "root" own org.mpris.MediaPlayer2.ShairportSync
-  //     on the system bus. We run as an ordinary user, so the system bus
-  //     would refuse us.
-  //  2. Omarchy's own media service reads Quickshell.Services.Mpris, which
-  //     enumerates the session bus. On the session bus the receiver shows up
-  //     in the media widget for free.
+  // The session bus: the system bus admits only root and the shairport-sync
+  // user, and the shell reads MPRIS from the session bus.
   mpris_service_bus = "session";
   dbus_service_bus = "session";
 };
 
-// This build reports "metadata", "dbus" and "mpris", and shairport-sync turns
-// "enabled" and "include_cover_art" on by default whenever one of those is
-// compiled in. Both are set explicitly anyway so the file says what it does.
+// Metadata and cover art, explicitly, so this file says what it does.
 metadata = {
   enabled = "yes";
   include_cover_art = "yes";
-  // Default is /tmp/shairport-sync/.cache/coverart. Keep it under \$HOME so the
-  // receiver writes nothing outside \$HOME, and so the art URL reaching MPRIS
-  // stays readable after a tmp clean.
+  // Under \$HOME rather than the default in /tmp.
   cover_art_cache_directory = "$(escape_libconfig "$CACHE_DIR/coverart")";
-  // With metadata on -- needed here, because cover art is only asked for when
-  // it is -- the receiver always makes a metadata FIFO, and an empty name is
-  // ignored. Its default is /tmp/shairport-sync-metadata, created mode
-  // 0666 under umask 000 and reused if it already exists (shairport.c:1700,
-  // rtsp.c:3984 in 5.0.4) -- so any local account could read the track and
-  // cover art, or plant the FIFO first. Nothing here reads it; it only needs
-  // to live somewhere private: this 0700 directory, and not coverart/, whose
-  // files the receiver deletes each time a new cover arrives.
+  // Always created with metadata on, and the default is a world-writable FIFO
+  // in /tmp. Nothing reads it; it only has to be private (not in coverart/,
+  // which the receiver clears).
   pipe_name = "$(escape_libconfig "$CACHE_DIR/metadata-pipe")";
 };
 
@@ -184,18 +126,9 @@ if [[ $PRINT_ONLY == yes ]]; then
   exit 0
 fi
 
-# This path is not one shairport-sync reads by default -- its own default is
-# /etc/shairport-sync.conf, and the unit passes ours explicitly with -c. But it
-# is a plausible place for someone to have kept a hand-written config, and this
-# script overwrites the file wholesale. So refuse to touch anything that is not
-# already ours, rather than silently destroying it.
-#
-# The test is the dedicated `// omairplay:generated` marker line, NOT the
-# human-readable header underneath it. Guarding on the prose was the first
-# attempt and it immediately rejected our own config, because the wording had
-# been changed since that file was written. The marker never changes.
-# -L as well as -f: a symlink to a regular file passes -f, and the clobber
-# guard would then be reading somewhere other than where the write lands.
+# Never overwrite a file that is not ours: refuse anything without the
+# generated marker line unless --force. -L too, so the guard reads where the
+# write lands.
 if [[ -f $CONFIG_FILE && ! -L $CONFIG_FILE && $FORCE != yes ]] \
    && ! grep -q '^// omairplay:generated' "$CONFIG_FILE"; then
   cat >&2 <<MSG
@@ -208,8 +141,7 @@ MSG
   exit 3
 fi
 
-# Through the installer as well: mkdir -p walks by name, so a symlink on the
-# way redirects where the config and the cover-art cache end up.
+# Through the installer: mkdir -p would follow a planted symlink.
 "$INSTALL_FILE" --mkdir "$CONFIG_DIR" 0700 >/dev/null
 "$INSTALL_FILE" --mkdir "$CACHE_DIR/coverart" 0700 >/dev/null
 TMP="$(mktemp "$CONFIG_DIR/.shairport-sync.conf.XXXXXX")"
@@ -217,11 +149,7 @@ trap 'rm -f "$TMP"' EXIT
 render >"$TMP"
 chmod 0644 "$TMP"
 
-# Leave the file alone when nothing actually changed, ignoring the generated
-# timestamp comment. The receiver only reads its config at startup, so
-# "was this file written after the receiver started?" is how the plugin decides
-# whether a restart is owed -- and rewriting a byte-identical file would make
-# it claim a restart is needed when nothing changed at all.
+# Leave an unchanged file alone, or the plugin would claim a restart is owed.
 if [[ -f $CONFIG_FILE && ! -L $CONFIG_FILE ]] \
    && diff -q <(grep -v '^// Written:' "$CONFIG_FILE") \
               <(grep -v '^// Written:' "$TMP") >/dev/null 2>&1; then
@@ -231,15 +159,8 @@ if [[ -f $CONFIG_FILE && ! -L $CONFIG_FILE ]] \
   exit 0
 fi
 
-# Placed with the installer rather than moved into position directly.
-#
-# mktemp in the destination plus mv is already exclusive and atomic, but it
-# resolves the destination by name, so a link left at ~/.config or
-# ~/.config/shairport-sync would put this file somewhere else -- and
-# shairport-sync's config format has sessioncontrol hooks that run commands, so
-# where it lands matters. The installer refuses a symlink at any component
-# below the home directory, which is the same check the state directory and the
-# unit get.
+# Placed with the installer, which refuses a symlink at any component below
+# home: where this file lands matters, since its hooks can run commands.
 "$INSTALL_FILE" "$TMP" "$CONFIG_FILE" 0644 >/dev/null
 rm -f "$TMP"
 trap - EXIT

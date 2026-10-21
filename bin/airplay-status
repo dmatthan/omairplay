@@ -1,36 +1,13 @@
 #!/bin/bash
-# Report the receiver's state as JSON on stdout. Unprivileged and read-only.
-#
-# One process per refresh rather than six: the widget polls this on a timer,
-# and a bar widget should not fork a handful of processes every few seconds.
+# Report the receiver's state as JSON on stdout. Unprivileged and read-only;
+# one process per poll.
 
 set -uo pipefail
 
-# Re-exec once with a closed environment.
-#
-# Pinning PATH was not enough. bash reads BASH_ENV for every non-interactive
-# script and sources it before the first line here runs, so a hostile value
-# executes arbitrary code in this shell -- including defining a function named
-# `sudo`, which would then shadow the real command in the privileged steps.
-# Unsetting it here cannot help: by then it has already been sourced. The only
-# fix is to start again in an environment we built ourselves.
-#
-# env -i drops everything; what follows is the complete allowlist. It closes
-# BASH_ENV and ENV (shell), PYTHONPATH and PYTHONHOME (our python3 helpers),
-# LD_PRELOAD and friends (every dynamically linked binary), and CDPATH, IFS and
-# GLOBIGNORE (word splitting and `cd`).
-#
-# The gate is a leading argument, not an environment variable: anything able to
-# set a variable could otherwise set the marker and skip the re-exec.
-#
-# HOME comes from the passwd database rather than the environment. The systemd
-# unit resolves its paths with %h, which is the passwd home, so taking it from
-# anywhere else let the two disagree -- a user with XDG_CONFIG_HOME set had the
-# config written where the receiver would never read it. XDG_* is deliberately
-# not carried through, so every path is the one the README documents.
-#
-# OMARCHY_PATH is set to the value the omarchy package itself hardcodes rather
-# than inherited, for the same reason PATH is not inherited.
+# Re-exec once in an environment built here: bash has already sourced BASH_ENV
+# by the first line, and LD_PRELOAD and friends reach every binary. The gate is
+# an argument, not a variable, so it cannot be set from outside. HOME comes
+# from passwd to match the unit's %h; XDG_* is never carried through.
 if [[ ${1:-} != --omairplay-sealed-env ]]; then
   _oa_user="$(/usr/bin/id -un)"
   _oa_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | /usr/bin/cut -d: -f6)"
@@ -68,10 +45,8 @@ command -v shairport-sync >/dev/null; BINARY=$?
 [[ -f $UNIT_PATH ]]; UNIT_FILE=$?
 [[ -f $CONFIG ]]; CONFIG_FILE=$?
 
-# One `systemctl show` per bus rather than an is-active and is-enabled per
-# unit: this runs every few seconds, and nine systemctl processes were most of
-# its ~45 ms. `show` prints a blank-line-separated block per unit, in the order
-# named, but its properties in an order of its own, so they are read by key.
+# One `systemctl show` per bus; it prints properties in its own order, so
+# they are read by key.
 declare -A P=()
 read_units() {
   local prefix="$1" n=0 line
@@ -86,8 +61,7 @@ read_units user < <(systemctl --user show "$UNIT" shairport-sync.service \
 read_units sys < <(systemctl show shairport-sync.service nqptp.service \
   -p "$PROPS" --timestamp=unix 2>/dev/null)
 
-# The exit-status meaning of is-active and is-enabled, from systemctl(1), so
-# the conflict checks below answer exactly as those commands did.
+# The exit-status meaning of is-active and is-enabled, from systemctl(1).
 is_active() { [[ $1 == active || $1 == reloading || $1 == refreshing ]]; }
 is_enabled() {
   case "$1" in
@@ -101,9 +75,7 @@ UNITFILE="${P[user0.UnitFileState]:-}"
 # is-enabled printed not-found for a missing unit; show leaves it empty.
 [[ -z $UNITFILE && ${P[user0.LoadState]:-} == not-found ]] && UNITFILE=not-found
 
-# Safety rule 4: anything else holding the AirPlay 2 slot is a conflict, and
-# there are two candidates -- the packaged system unit and the packaged *user*
-# unit, whose preset is "enabled".
+# Another receiver holding the AirPlay 2 slot: the packaged system or user unit.
 SYS=false
 is_active "${P[sys0.ActiveState]:-}" && SYS=true
 is_enabled "${P[sys0.UnitFileState]:-}" && SYS=true
@@ -111,22 +83,13 @@ PKG=false
 is_active "${P[user1.ActiveState]:-}" && PKG=true
 is_enabled "${P[user1.UnitFileState]:-}" && PKG=true
 
-# The clock-sync service AirPlay 2 needs. It is a *system* service, so the
-# system bus reads it; asking needs no privilege. The unit asserts it at
-# start, but it can stop later without the receiver noticing, and then the
-# speaker is visible and silent.
+# The clock-sync service AirPlay 2 needs. It can stop after the receiver
+# started, leaving the speaker visible and silent.
 NQPTP=false
 is_active "${P[sys1.ActiveState]:-}" && NQPTP=true
 
-# Whether the receiver is actually accepting connections. shairport-sync in a
-# dead audio context keeps running and tears down its listeners while still
-# advertising over mDNS -- the state that looks ready and plays nothing. So
-# the popup can tell "active" from "usable" by looking at the listener.
-#
-# /proc/net/tcp and tcp6 are read directly, in bash. The poll runs every few
-# seconds, and a Python process here was a fork plus interpreter startup on
-# every refresh for two columns of a proc file. Port 7000 is 0x1B58, state 0A
-# is LISTEN, and bash converts the hex field itself with 16#.
+# Whether the receiver accepts connections: in a dead audio context it keeps
+# advertising with no listener. Port 7000 is 0x1B58, LISTEN is 0A.
 listening_on() {
   local wanted="$1" file local_addr state port
   for file in /proc/net/tcp /proc/net/tcp6; do
@@ -145,16 +108,9 @@ if [[ $ACTIVE == active ]] && listening_on 7000; then
   LISTENING=true
 fi
 
-# The name the receiver is actually advertising, read back from the generated
-# config rather than from the plugin's settings -- so the popup can tell the
-# difference between "you typed a new name" and "the receiver has that name".
+# The name the receiver actually advertises, read back from its config.
 NAME=""
-# -f and not -L, not -r. A FIFO is readable, and sed on one blocks until
-# something writes to it -- which turns this probe into a process that never
-# returns. The read is also capped: this only needs the first name line, and a
-# substituted file should not be streamed into memory. The deadline the caller
-# applies would eventually kill a blocked probe, but not returning at all is
-# still the wrong behaviour for something that runs every few seconds.
+# -f and not -L: a FIFO would block the read forever. Capped as well.
 if [[ -f $CONFIG && ! -L $CONFIG ]]; then
   NAME="$(head -c 65536 "$CONFIG" \
     | sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
@@ -162,18 +118,11 @@ if [[ -f $CONFIG && ! -L $CONFIG ]]; then
   # Undo the libconfig escaping airplay-write-config applies.
   NAME="${NAME//\\\"/\"}"
   NAME="${NAME//\\\\/\\}"
-  # Cap it. shairport-sync itself advertises at most 50 characters, and the
-  # popup shows fewer, but this is read out of a file the user can edit by
-  # hand -- so the field is bounded here rather than left to whatever is in
-  # the config. Keeps this program's output bounded by construction: fixed
-  # keys, one short variable string, no unbounded field anywhere.
+  # Bounded: the file is hand-editable, and the output stays bounded.
   NAME="${NAME:0:64}"
 fi
 
-# The config is only read at startup, so a config written *after* the receiver
-# started is a name (or backend) change that has not taken effect yet. Without
-# this the popup would happily show the new name while the receiver kept
-# broadcasting the old one -- which is a genuinely confusing state to be in.
+# The config is read only at startup, so one written since is not live yet.
 STALE=false
 if [[ -f $CONFIG ]] && [[ $ACTIVE == active ]]; then
   # Already fetched above, as @<epoch> by --timestamp=unix.

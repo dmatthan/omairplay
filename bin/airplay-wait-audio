@@ -1,66 +1,18 @@
 #!/bin/bash
-# Block until the audio server is both usable and settled, or give up.
+# Block until the audio server is usable and settled, or give up. The unit's
+# ExecStartPre gate.
 #
-# Used as an ExecStartPre gate, and it took three attempts to get right --
-# the history matters, because the obvious fixes are all too weak:
-#
-#  1. `pactl info` only proves the socket is listening. At login that is true
-#     almost immediately, so it passes while there is still no device.
-#  2. Waiting for a real sink is better, but still not enough.
-#  3. The actual problem: **pipewire-pulse restarts about five seconds into
-#     every login**, once the session has finished importing its environment.
-#     Observed identically on two consecutive boots:
-#
-#         15:25:16  Started PipeWire PulseAudio.
-#         15:25:18  Started AirPlay receiver.      <- context connected here
-#         15:25:21  Stopping PipeWire PulseAudio...
-#         15:25:21  Started PipeWire PulseAudio.   <- different instance
-#
-#     shairport-sync holds its PulseAudio context from startup and never
-#     reconnects, so it survives that restart attached to a server that is
-#     gone. Nothing looks wrong until a device actually connects, at which
-#     point the stream open fails:
-#
-#         fatal error: could not connect to the pulseaudio playback stream
-#         -- the error message is "Bad state".
-#
-#     and shairport-sync logs it without exiting, tearing down its listeners
-#     (port 7000 included) while still advertising over mDNS. The result is a
-#     speaker the phone can see and cannot connect to.
-#
-# So wait for pipewire-pulse to have been continuously up for a while, not
-# merely up. On a running system that is already true and this returns at once;
-# at login it holds the receiver back until after the session's own restart.
-#
-# Run it by hand to see what it decides -- it explains itself.
+# pipewire-pulse restarts a few seconds into every login, and shairport-sync
+# never reconnects its PulseAudio context: started too early, it advertises
+# but cannot play. So wait for a real sink and for pipewire-pulse to have been
+# up for a while, not merely up. Run it by hand to see what it decides.
 
 set -uo pipefail
 
-# Re-exec once with a closed environment.
-#
-# Pinning PATH was not enough. bash reads BASH_ENV for every non-interactive
-# script and sources it before the first line here runs, so a hostile value
-# executes arbitrary code in this shell -- including defining a function named
-# `sudo`, which would then shadow the real command in the privileged steps.
-# Unsetting it here cannot help: by then it has already been sourced. The only
-# fix is to start again in an environment we built ourselves.
-#
-# env -i drops everything; what follows is the complete allowlist. It closes
-# BASH_ENV and ENV (shell), PYTHONPATH and PYTHONHOME (our python3 helpers),
-# LD_PRELOAD and friends (every dynamically linked binary), and CDPATH, IFS and
-# GLOBIGNORE (word splitting and `cd`).
-#
-# The gate is a leading argument, not an environment variable: anything able to
-# set a variable could otherwise set the marker and skip the re-exec.
-#
-# HOME comes from the passwd database rather than the environment. The systemd
-# unit resolves its paths with %h, which is the passwd home, so taking it from
-# anywhere else let the two disagree -- a user with XDG_CONFIG_HOME set had the
-# config written where the receiver would never read it. XDG_* is deliberately
-# not carried through, so every path is the one the README documents.
-#
-# OMARCHY_PATH is set to the value the omarchy package itself hardcodes rather
-# than inherited, for the same reason PATH is not inherited.
+# Re-exec once in an environment built here: bash has already sourced BASH_ENV
+# by the first line, and LD_PRELOAD and friends reach every binary. The gate is
+# an argument, not a variable, so it cannot be set from outside. HOME comes
+# from passwd to match the unit's %h; XDG_* is never carried through.
 if [[ ${1:-} != --omairplay-sealed-env ]]; then
   _oa_user="$(/usr/bin/id -un)"
   _oa_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | /usr/bin/cut -d: -f6)"
@@ -89,13 +41,12 @@ shift
 
 
 TIMEOUT="${1:-45}"
-# Comfortably longer than the ~5s restart observed at login.
+# Longer than the ~5 s restart observed at login.
 MIN_STABLE_SEC="${2:-12}"
 PULSE_UNIT="pipewire-pulse.service"
 
 if ! command -v pactl >/dev/null 2>&1; then
-  # libpulse ships pactl and shairport-sync depends on libpulse, so this should
-  # not happen -- but do not block the receiver over a missing diagnostic tool.
+  # Should not happen (libpulse ships pactl); never block the receiver over it.
   echo "airplay-wait-audio: pactl not found, not waiting" >&2
   exit 0
 fi
@@ -108,8 +59,7 @@ real_sink_present() {
   awk '$2 != "auto_null" { found = 1 } END { exit found ? 0 : 1 }' <<<"$sinks"
 }
 
-# Seconds pipewire-pulse has been continuously active. Both clocks are
-# monotonic since boot, so this is immune to wall-clock changes.
+# Seconds pipewire-pulse has been continuously active, on monotonic clocks.
 pulse_uptime_sec() {
   local mono up
   mono="$(systemctl --user show "$PULSE_UNIT" -p ActiveEnterTimestampMonotonic --value 2>/dev/null)"
@@ -124,8 +74,7 @@ for (( i = 0; i < TIMEOUT; i++ )); do
   if real_sink_present; then
     stable="$(pulse_uptime_sec)" || stable=""
     if [[ -z $stable ]]; then
-      # No usable timestamp (pipewire-pulse not managed as a unit, say). The
-      # sink check has already passed, so do not block on a missing signal.
+      # No usable timestamp; the sink check passed, so do not block.
       echo "airplay-wait-audio: sink ready; $PULSE_UNIT age unknown, continuing"
       exit 0
     fi

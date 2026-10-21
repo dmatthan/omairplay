@@ -1,39 +1,13 @@
 #!/bin/bash
-# Report whether the firewall currently allows AirPlay, as JSON on stdout.
-#
-# Needs no root: /etc/ufw/user.rules and user6.rules are world-readable, so the
-# plugin can compare the rules that are actually present against the ones the
-# shared spec says should exist.
-#
-# Exit status is always 0 when the JSON is valid; read "ok" for the verdict.
+# Report whether the firewall allows AirPlay, as JSON on stdout. No root: the
+# ufw rule files are world-readable. Exit 0 whenever the JSON is valid.
 
 set -uo pipefail
 
-# Re-exec once with a closed environment.
-#
-# Pinning PATH was not enough. bash reads BASH_ENV for every non-interactive
-# script and sources it before the first line here runs, so a hostile value
-# executes arbitrary code in this shell -- including defining a function named
-# `sudo`, which would then shadow the real command in the privileged steps.
-# Unsetting it here cannot help: by then it has already been sourced. The only
-# fix is to start again in an environment we built ourselves.
-#
-# env -i drops everything; what follows is the complete allowlist. It closes
-# BASH_ENV and ENV (shell), PYTHONPATH and PYTHONHOME (our python3 helpers),
-# LD_PRELOAD and friends (every dynamically linked binary), and CDPATH, IFS and
-# GLOBIGNORE (word splitting and `cd`).
-#
-# The gate is a leading argument, not an environment variable: anything able to
-# set a variable could otherwise set the marker and skip the re-exec.
-#
-# HOME comes from the passwd database rather than the environment. The systemd
-# unit resolves its paths with %h, which is the passwd home, so taking it from
-# anywhere else let the two disagree -- a user with XDG_CONFIG_HOME set had the
-# config written where the receiver would never read it. XDG_* is deliberately
-# not carried through, so every path is the one the README documents.
-#
-# OMARCHY_PATH is set to the value the omarchy package itself hardcodes rather
-# than inherited, for the same reason PATH is not inherited.
+# Re-exec once in an environment built here: bash has already sourced BASH_ENV
+# by the first line, and LD_PRELOAD and friends reach every binary. The gate is
+# an argument, not a variable, so it cannot be set from outside. HOME comes
+# from passwd to match the unit's %h; XDG_* is never carried through.
 if [[ ${1:-} != --omairplay-sealed-env ]]; then
   _oa_user="$(/usr/bin/id -un)"
   _oa_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | /usr/bin/cut -d: -f6)"
@@ -84,9 +58,7 @@ UFW_ENABLED=false
 UFW_IPV6=false
 [[ -r /etc/default/ufw ]] && grep -qE '^IPV6=yes' /etc/default/ufw && UFW_IPV6=true
 
-# IPv4 rules land in user.rules, IPv6 in user6.rules; both world-readable. The
-# match deliberately ignores anything after "in", so it works whether or not
-# the rule carries a `comment=` tag.
+# Matches with or without the rule's comment tag.
 rule_present() {
   local proto="$1" port="$2" src="$3" file
   if [[ $src == *:* ]]; then file=/etc/ufw/user6.rules; else file=/etc/ufw/user.rules; fi
@@ -99,30 +71,20 @@ rule_present() {
 
 mapfile -t GLOBAL_V6 < <(omairplay_global_v6_prefixes)
 [[ $UFW_IPV6 == true ]] || GLOBAL_V6=()
-# Bound the list. A machine with a pathological number of global IPv6 prefixes
-# would otherwise make this program's output -- and the rule set derived from
-# it below -- grow without limit. Eight is far more than a home router hands
-# out, and it keeps the JSON bounded by construction, which is what lets the
-# caller read it without a byte cap.
+# Bounded, so the output and the rules derived from it stay bounded.
 GLOBAL_V6=( ${GLOBAL_V6+"${GLOBAL_V6[@]:0:8}"} )
 
 MISSING=()
 while IFS='|' read -r cidr port proto; do
   [[ -n $cidr ]] || continue
-  # Skip IPv6 rules entirely when ufw has IPv6 turned off; they would be
-  # accepted and then ignored.
+  # ufw with IPv6 off would accept these rules and ignore them.
   [[ $cidr == *:* && $UFW_IPV6 != true ]] && continue
   rule_present "$proto" "$port" "$cidr" \
     || MISSING+=( "allow from $cidr to any port $port proto $proto" )
 done < <(omairplay_rules yes ${GLOBAL_V6+"${GLOBAL_V6[@]}"})
 
-# ufw with IPv6 turned off does not filter IPv6 at all -- its backend skips
-# the v6 chains outright -- so that is not a state to warn about. The rules
-# this machine would need are simply not ufw's to add, and the failure it could
-# cause is reported by airplay-status as a receiver that is up and silent.
-#
-# "ok" means "no reason to warn", not "everything was verified". A firewall
-# that is off blocks nothing.
+# ufw with IPv6 off filters nothing on IPv6, so there is nothing to warn about.
+# "ok" means no reason to warn, not that everything was verified.
 OK=false
 REASON=""
 if [[ $UFW_PRESENT == false || $UFW_ENABLED == false ]]; then

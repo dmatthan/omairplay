@@ -4,21 +4,10 @@ import qs.Ui
 
 // Single-line speaker-name field that never reads the clipboard.
 //
-// Not a TextField: every editable TextInput connects to QClipboard::dataChanged
-// when it is created, and Qt 6.11's q_canPasteChanged() calls
-// mimeData->text() -- so each clipboard change made the shell pull the whole
-// foreign offer on the GUI thread, through a Wayland reader with a 1 s idle
-// timeout and no byte cap or total deadline. The popup's content lives for the
-// whole session, so hiding it never helped. TextEdit's canPaste() asks
-// canInsertFromMimeData(), which with plain text is hasText(): a check of the
-// offered formats that fetches no payload (qquicktextcontrol.cpp, 6.11 and
-// 6.12). TextEdit also has no drop handling.
-//
-// What remains are the two explicit paste paths, and both are closed: the Paste
-// key sequence is swallowed below, and a middle click never reaches the editor.
-// Paste is simply unavailable; a speaker name is short enough to type.
-//
-// Styling is the host's Ui/TextField, rebuilt around a TextEdit.
+// Not a TextField: an editable TextInput reads every foreign clipboard offer in
+// full on the GUI thread as it changes (Qt 6.11 q_canPasteChanged). TextEdit's
+// paste check looks at the offered formats only. Its two paste paths, the
+// Paste shortcut and middle click, are closed below.
 FocusScope {
   id: root
 
@@ -31,8 +20,7 @@ FocusScope {
   property color accent: Color.accent
   property bool hasCursor: false
 
-  // Keys the panel acts on. Handled here and accepted, so none of them reaches
-  // the editor -- Return would otherwise insert a newline.
+  // Keys the panel acts on, accepted here so none reaches the editor.
   signal submitted()
   signal cancelled()
   signal navigated(int delta)
@@ -60,8 +48,7 @@ FocusScope {
     cursorShape: Qt.IBeamCursor
   }
 
-  // Presses outside the text itself (padding, or past the end of a short
-  // name) still focus the field and place the cursor, as TextField did.
+  // Presses in the padding still focus the field and place the cursor.
   MouseArea {
     anchors.fill: parent
     cursorShape: Qt.IBeamCursor
@@ -96,8 +83,7 @@ FocusScope {
     TextEdit {
       id: edit
       focus: true
-      // TextInput scrolled itself to keep the cursor in view; TextEdit does
-      // not, so the field shifts it (see ensureCursorVisible).
+      // TextEdit does not scroll to the cursor itself; see ensureCursorVisible.
       x: -scroll
       y: Math.round((viewport.height - height) / 2)
       textFormat: TextEdit.PlainText
@@ -129,10 +115,8 @@ FocusScope {
         function onWidthChanged() { edit.ensureCursorVisible() }
       }
 
-      // One line, no control characters, at most maximumLength: Tab and
-      // newlines can still arrive through an input method's commit string.
-      // Excess is trimmed from what was just typed, before the cursor, so the
-      // existing name is kept the way TextInput's maximumLength kept it.
+      // One line, no control characters (an input method can commit Tab or a
+      // newline), at most maximumLength; excess is trimmed from what was typed.
       onTextChanged: {
         if (fixing) return
         fixing = true
@@ -165,8 +149,7 @@ FocusScope {
         } else if (event.key === Qt.Key_Down) {
           event.accepted = true; root.navigated(1)
         } else if (event.matches(StandardKey.Paste) || event.key === Qt.Key_Paste) {
-          // QQuickTextControl answers QKeySequence::Paste with a synchronous,
-          // unbounded clipboard read. Swallowed: paste does nothing.
+          // Paste would be a synchronous, unbounded clipboard read: swallowed.
           event.accepted = true
         } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
           // TextEdit would insert a tab character.
@@ -175,8 +158,7 @@ FocusScope {
       }
     }
 
-    // Middle click pastes the primary selection in TextEdit (a synchronous,
-    // unbounded read on release). Taken here, above the editor, and dropped.
+    // Middle click would paste the primary selection (an unbounded read): dropped.
     MouseArea {
       anchors.fill: parent
       acceptedButtons: Qt.MiddleButton
