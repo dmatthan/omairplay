@@ -293,7 +293,12 @@ Item {
     return playing ? "playing" : "idle"
   }
 
-  // Short: PanelHero renders it in small caps.
+  // The sending device's name, from airplay-status (sanitised there).
+  property string clientName: ""
+  readonly property string sender: clientName.length > 40
+    ? clientName.substring(0, 40).replace(/[\ud800-\udbff]$/, "") + "…" : clientName
+
+  // Short: PanelHero renders it in small caps and elides it.
   readonly property string statusText: {
     if (actionLabel !== "") return actionLabel + "\u2026"
     if (needsRepair) return "Needs repair"
@@ -302,7 +307,7 @@ Item {
       case "failed":   return "Failed"
       case "off":      return "Off"
       case "starting": return "Starting"
-      case "playing":  return "Playing"
+      case "playing":  return sender !== "" ? "Playing from " + sender : "Playing"
       default:        return "Ready"
     }
   }
@@ -408,7 +413,8 @@ Item {
     onTriggered: root.audioStalled = true
   }
   onAudioStreamUpChanged: if (audioStreamUp) audioStalled = false
-  onPlayingChanged: if (!playing) audioStalled = false
+  // A new session: fetch the sender's name now, not at the next poll.
+  onPlayingChanged: if (!playing) audioStalled = false; else refresh()
   onEffectiveRunningChanged: if (!effectiveRunning) audioStalled = false
 
   // ------------------------------------------------------------ self-healing
@@ -608,6 +614,7 @@ Item {
         root.systemUnitBusy = !!s.system_unit_busy
         root.packagedUnitBusy = !!s.packaged_unit_busy
         root.advertisedName = String(s.advertised_name || "")
+        root.clientName = String(s.client_name || "")
         root.configStale = !!s.config_stale
         root.nqptpActive = s.nqptp !== false
         root.listening = s.listening !== false

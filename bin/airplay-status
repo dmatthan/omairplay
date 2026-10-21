@@ -108,6 +108,25 @@ if [[ $ACTIVE == active ]] && listening_on 7000; then
   LISTENING=true
 fi
 
+# The sending device's name. The sender chooses it, so it is read as JSON
+# (UTF-8 intact), unescaped, stripped of control characters and capped.
+CLIENT=""
+if [[ $ACTIVE == active ]]; then
+  CLIENT="$(busctl --user --timeout=2 get-property org.gnome.ShairportSync \
+    /org/gnome/ShairportSync org.gnome.ShairportSync.RemoteControl ClientName \
+    --json=short 2>/dev/null | head -c 4096)"
+  if [[ $CLIENT == '{"type":"s","data":"'*'"}' ]]; then
+    CLIENT="${CLIENT#*\"data\":\"}"
+    CLIENT="${CLIENT%\"\}}"
+    CLIENT="$(printf '%s' "$CLIENT" \
+      | sed -E 's/\\u[0-9a-fA-F]{4}//g; s/\\[bfnrt]//g; s/\\"/"/g; s/\\\\/\\/g')"
+    CLIENT="${CLIENT//[[:cntrl:]]/}"
+    CLIENT="${CLIENT:0:256}"
+  else
+    CLIENT=""
+  fi
+fi
+
 # The name the receiver actually advertises, read back from its config.
 NAME=""
 # -f and not -L: a FIFO would block the read forever. Capped as well.
@@ -151,5 +170,6 @@ printf '"packaged_unit_busy":%s,' "$PKG"
 printf '"nqptp":%s,' "$NQPTP"
 printf '"listening":%s,' "$LISTENING"
 printf '"advertised_name":"%s",' "$(json_escape "$NAME")"
+printf '"client_name":"%s",' "$(json_escape "$CLIENT")"
 printf '"config_stale":%s' "$STALE"
 printf '}\n'

@@ -69,8 +69,8 @@ The bar icon shows the receiver's state:
 - **Click** — open the popup; **right-click** — turn the receiver on or off
 - In the popup: `j`/`k` or arrows to move, `Enter` to activate, `Esc` to close
 
-The popup shows what's playing — title, artist, album, cover art, the sending
-device's volume, and a level meter driven by the receiver's real output. Where
+The popup shows what's playing — title, artist, album, cover art, which device
+is sending and its volume, and a level meter driven by the receiver's real output. Where
 the output device can't be metered, the meter is left out rather than drawn
 flat. A track change raises a notification with the cover art.
 
