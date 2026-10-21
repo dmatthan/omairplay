@@ -129,8 +129,14 @@ fi
 
 # The name the receiver actually advertises, read back from its config.
 NAME=""
+# Which version of airplay-write-config's template wrote the config (0: none),
+# so a config from an older template can be regenerated.
+TEMPLATE=0
 # -f and not -L: a FIFO would block the read forever. Capped as well.
 if [[ -f $CONFIG && ! -L $CONFIG ]]; then
+  TEMPLATE="$(head -c 65536 "$CONFIG" \
+    | sed -n 's|^// omairplay:template \([0-9]\{1,4\}\)$|\1|p' | head -1)"
+  TEMPLATE="${TEMPLATE:-0}"
   NAME="$(head -c 65536 "$CONFIG" \
     | sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
     | head -1)"
@@ -171,5 +177,6 @@ printf '"nqptp":%s,' "$NQPTP"
 printf '"listening":%s,' "$LISTENING"
 printf '"advertised_name":"%s",' "$(json_escape "$NAME")"
 printf '"client_name":"%s",' "$(json_escape "$CLIENT")"
+printf '"config_template":%s,' "$TEMPLATE"
 printf '"config_stale":%s' "$STALE"
 printf '}\n'

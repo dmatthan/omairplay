@@ -136,6 +136,12 @@ Item {
   // The receiver reads its config only at startup.
   property bool configStale: false
 
+  // airplay-write-config's template version; an older config is regenerated
+  // once per session, keeping its name, so a plugin update reaches it.
+  readonly property int configTemplate: 2
+  property int configTemplateFound: configTemplate
+  property bool _configMigrated: false
+
   // Another shairport-sync (system or user unit) holding the one AirPlay 2 slot.
   property bool systemUnitBusy: false
   property bool packagedUnitBusy: false
@@ -187,6 +193,7 @@ Item {
       case "enable":  return "Enabling at login"
       case "disable": return "Disabling at login"
       case "name":    return "Renaming"
+      case "update":  return "Updating"
       default:        return ""
     }
   }
@@ -498,6 +505,27 @@ Item {
     runSteps("name", steps)
   }
 
+  // Restarts only while nothing plays; otherwise the stale-config alert offers it.
+  function migrateConfig() {
+    if (busy || _configMigrated || !setupComplete) return
+    var name = advertisedName !== "" ? advertisedName : speakerName
+    _configMigrated = true
+    var steps = [[pluginDir + "/bin/airplay-write-config", "--name", name]]
+    if (running && !playing)
+      steps.push([binSystemctl, "--user", "restart", unit])
+    else
+      _restartWhenIdle = running
+    runSteps("update", steps)
+  }
+  property bool _restartWhenIdle: false
+  // Half a minute of silence, so a pause or a track change is never cut short.
+  Timer {
+    interval: 30000
+    running: root._restartWhenIdle && root.running && root.configStale
+             && !root.playing && !root.busy
+    onTriggered: { root._restartWhenIdle = false; root.restart() }
+  }
+
   // Visibly in a terminal, never pkexec: root must not run files from the
   // user-writable plugin folder.
   function runSetup(wide) {
@@ -616,8 +644,11 @@ Item {
         root.advertisedName = String(s.advertised_name || "")
         root.clientName = String(s.client_name || "")
         root.configStale = !!s.config_stale
+        root.configTemplateFound = Number(s.config_template) || 0
         root.nqptpActive = s.nqptp !== false
         root.listening = s.listening !== false
+        if (root.configPresent && root.configTemplateFound < root.configTemplate)
+          Qt.callLater(root.migrateConfig)
       } catch (e) {
         root.lastError = "Could not parse receiver status"
       }
