@@ -151,6 +151,7 @@ Item {
   property bool firewallOk: true
   property string firewallReason: ""
   property var firewallMissing: []
+  readonly property string firewallCheckFailed: "Could not check the firewall rules"
 
   // True until a poll says otherwise, so a first poll never flashes a warning.
   property bool nqptpActive: true
@@ -671,16 +672,21 @@ Item {
       }
     }
     onExited: function(exitCode) {
-      if (root._firewallCapped) { root._firewallCapped = false; return }
-      if (exitCode !== 0) return
-      try {
-        var f = JSON.parse(String(firewallOut.text || "{}"))
-        root.firewallOk = !!f.ok
-        root.firewallReason = String(f.reason || "")
-        root.firewallMissing = f.missing instanceof Array ? f.missing : []
-      } catch (e) {
-        // Leave the last known answer alone rather than claim a problem.
+      var capped = root._firewallCapped
+      root._firewallCapped = false
+      var f = null
+      if (!capped && exitCode === 0) {
+        try { f = JSON.parse(String(firewallOut.text || "{}")) } catch (e) { f = null }
       }
+      // A check that cannot run is reported, never read as "all fine".
+      if (!f || typeof f.ok !== "boolean") {
+        root.lastError = root.firewallCheckFailed
+        return
+      }
+      if (root.lastError === root.firewallCheckFailed) root.lastError = ""
+      root.firewallOk = f.ok
+      root.firewallReason = String(f.reason || "")
+      root.firewallMissing = f.missing instanceof Array ? f.missing : []
     }
   }
 
