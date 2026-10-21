@@ -151,6 +151,8 @@ Omarchy plugins run unsandboxed with your user's permissions, this one included:
 - Cover art is whatever the sending device sends, so the popup and
   notifications never show it as sent: only a copy rebuilt from its image data,
   PNG or JPEG only, size-capped, with all metadata removed.
+- Track titles, artists and albums are shown as plain text, length-capped,
+  so markup in them is never interpreted or fetched.
 - Commands are called by full path, in an environment the scripts build
   themselves, so nothing inherited from your session changes what runs.
 

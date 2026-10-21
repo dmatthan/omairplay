@@ -360,7 +360,13 @@ Panel {
             visible: root.svc !== null && root.svc.setupComplete && root.svc.effectiveRunning
                      && root.svc.playing && root.svc.hasTrack
 
+            // PlainText on every Text here, and essential on these two: the title,
+            // artist and album are the sending device's, and under the default
+            // AutoText an `<img src="http://...">` in them makes the shell fetch and
+            // buffer the response, with no click and nothing drawn (reproduced with a
+            // local server: one GET, +140 MB as it streamed; PlainText, no request).
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: root.svc ? root.svc.title : ""
               color: root.foreground
@@ -373,6 +379,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: text !== ""
               text: {
@@ -394,6 +401,7 @@ Panel {
 
           // A line for the states where there is nothing playing to show.
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: root.svc !== null && !(root.svc.setupComplete && root.svc.effectiveRunning
                      && root.svc.playing && root.svc.hasTrack)
@@ -448,6 +456,7 @@ Panel {
 
           // The phone's volume, which is readable but not settable from here.
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: root.svc !== null && root.svc.setupComplete && root.svc.effectiveRunning
                      && root.svc.playing && root.svc.senderVolume >= 0
@@ -592,6 +601,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: "Installs what the receiver needs and opens your firewall to your local network only. Runs in a terminal so you can see each step."
@@ -671,6 +681,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               visible: root.svc !== null && root.nameDraft.trim() !== ""
@@ -691,6 +702,7 @@ Panel {
             // belong on the phone, so say so once instead of drawing buttons
             // that lie.
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: "Use your phone to play, pause and skip."

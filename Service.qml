@@ -310,11 +310,27 @@ Item {
   readonly property var players: Mpris.players ? Mpris.players.values : []
   readonly property var player: findPlayer()
   readonly property bool playing: !!(player && player.isPlaying)
-  readonly property string title: player ? String(player.trackTitle || "") : ""
-  readonly property string artist: player ? String(player.trackArtist || "") : ""
-  readonly property string album: player ? String(player.trackAlbum || "") : ""
+  readonly property string title: player ? trackText(player.trackTitle) : ""
+  readonly property string artist: player ? trackText(player.trackArtist) : ""
+  readonly property string album: player ? trackText(player.trackAlbum) : ""
   readonly property string artUrl: player ? String(player.trackArtUrl || "") : ""
   readonly property bool hasTrack: title !== "" || artist !== ""
+
+  // Title, artist and album are whatever the sending device sends, at any
+  // length, and Qt lays out a whole string even where only two elided lines
+  // are drawn: measured, an 8M-character title cost the shell about 590 MB.
+  // No real title comes near the cap. Every reader of the track text goes
+  // through these three properties, so this is the one place to bound it.
+  readonly property int maxTrackChars: 512
+  function trackText(value) {
+    var s = String(value || "")
+    if (s.length <= maxTrackChars) return s
+    var end = maxTrackChars
+    // Do not leave half a surrogate pair at the cut.
+    var c = s.charCodeAt(end - 1)
+    if (c >= 0xd800 && c <= 0xdbff) end--
+    return s.slice(0, end) + "…"
+  }
 
   // The only cover the popup and notification may load: bin/airplay-cover-art's
   // rebuilt copy, never the sender's file at artUrl. Empty when there is no art
@@ -438,18 +454,30 @@ Item {
     // The rebuilt copy only: the shell's notification server decodes it too.
     if (coverArt !== "")
       args.push("-i", coverArt)
+    // Everything after this is the sender's text, and notify-send parses
+    // options anywhere in its arguments: a title of `--icon=<path>` replaced
+    // the rebuilt cover with a file of the sender's choosing (tested against
+    // a NotificationServer on a private bus). `--` ends option parsing.
+    args.push("--")
     args.push(title !== "" ? title : "AirPlay")
 
+    // The summary is plain text by the spec, but the body is markup, and the
+    // shell renders it as StyledText. Escape it so the sender's text is shown
+    // as text rather than parsed for tags and links.
     var sub = []
     if (artist !== "") sub.push(artist)
     if (album !== "" && album !== title) sub.push(album)
-    args.push(sub.join("  \u00b7  "))
+    args.push(escapeMarkup(sub.join("  \u00b7  ")))
 
     Quickshell.execDetached({
       command: args,
       clearEnvironment: true,
       environment: sealedEnv
     })
+  }
+
+  function escapeMarkup(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   }
 
   Component.onCompleted: {

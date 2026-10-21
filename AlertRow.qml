@@ -28,6 +28,7 @@ Item {
 
   Text {
     id: body
+    textFormat: Text.PlainText
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.verticalCenter: parent.verticalCenter
