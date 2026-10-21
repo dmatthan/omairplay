@@ -1,6 +1,6 @@
 # OmairPlay
 
-![OmairPlay](preview.png?v=4)
+![OmairPlay](preview.png?v=5)
 
 Turns your Omarchy machine into an AirPlay speaker. Tap it in your phone's
 AirPlay list and the audio comes out of your speakers — no desktop client, and
@@ -57,51 +57,36 @@ Pick your machine from the AirPlay list on your phone, and play:
 
 ![Choosing the speaker on iOS, and playing to it](iphone.png)
 
-The bar icon shows the receiver's state:
+The bar icon shows the receiver's state: dimmed when off, a cast icon while
+playing, the alert colour when it needs repair. Click it for the popup;
+right-click turns the receiver on or off. In the popup, `j`/`k` or the arrows
+move, `Enter` activates and `Esc` closes.
 
-| Icon | Meaning |
-|---|---|
-| Speaker, dimmed | Off, or not set up |
-| Speaker | Ready, waiting for a device |
-| Cast | Playing |
-| Speaker, alert colour | Needs repair — press Repair in the popup |
+The popup shows what's playing and from which device, with the cover art, the
+sender's volume and a level meter driven by the receiver's real output. Each
+new track raises a notification. Colours and font follow your Omarchy theme:
 
-- **Click** — open the popup; **right-click** — turn the receiver on or off
-- In the popup: `j`/`k` or arrows to move, `Enter` to activate, `Esc` to close
+![The popup under four Omarchy themes](themes.png?v=5)
 
-The popup shows what's playing — title, artist, album, cover art, which device
-is sending and its volume, and a level meter driven by the receiver's real output. Where
-the output device can't be metered, the meter is left out rather than drawn
-flat. A track change raises a notification with the cover art.
+## Settings and repair
 
-![The popup under four Omarchy themes](themes.png?v=4)
-
-Colours and font come from your current Omarchy theme.
-
-## Settings
-
-All in the popup: **start at login**, **speaker name**, **track notifications**,
-**cover art**, and **Repair**. Renaming and Repair both interrupt playback, so
-each asks first.
-
-The toggles are also bar settings, if you prefer the command line:
+Everything else is under **Settings** in the popup: start at login, speaker
+name, track notifications, cover art, Repair and Uninstall. Renaming and Repair
+interrupt playback, so each asks first. The two toggles are also bar settings:
 
 ```bash
 omarchy bar set io.github.dmatthan.omairplay trackNotifications false
 omarchy bar set io.github.dmatthan.omairplay showArtwork false
 ```
 
-## If the speaker appears but won't play
+![Settings expanded, and a problem shown with its fix](settings.png?v=1)
 
-Open the popup. OmairPlay reads the live `ufw` rules and the receiver's health
-and names what is wrong — a missing rule, a new IPv6 prefix, `nqptp` not
-running, or a track showing while no audio arrives. **Repair** reverts the
-receiver's setup and redoes it for the addresses your machine has now: one
-terminal, one password prompt, playback briefly interrupted, the receiver put
-back as it was.
-
-A receiver that stalls is restarted on its own, up to twice in a quarter of an
-hour, before it asks you to press Repair.
+If the speaker shows up on your phone but won't play, the popup names the
+reason (a missing firewall rule, a new IPv6 prefix, clock sync down, or no
+audio arriving) with a **Repair** button beside it. Repair redoes the setup for
+the addresses your machine has now: one terminal, one password prompt, the
+receiver put back as it was. A stalled receiver restarts on its own, up to
+twice in 15 minutes, before asking.
 
 ## Uninstalling it
 
@@ -145,13 +130,13 @@ Omarchy plugins run unsandboxed with your user's permissions, this one included:
 - Firewall rules cover private ranges only, never Anywhere, and `ufw` is never
   disabled or reset. Every rule is tagged `omairplay`, and removal finds them by
   that tag.
-- Your local network is the trust boundary: a device has to be on it to reach
-  the receiver.
+- Your local network is the trust boundary: any device on it can play to the
+  receiver, without pairing. Turn the receiver off on networks you don't trust.
 - Cover art is whatever the sending device sends, so the popup and
   notifications never show it as sent: only a copy rebuilt from its image data,
   PNG or JPEG only, size-capped, with all metadata removed.
-- Track titles, artists and albums are shown as plain text, length-capped,
-  so markup in them is never interpreted or fetched.
+- Track titles, artists, albums and the sending device's name are shown as
+  plain text, length-capped, so markup in them is never interpreted or fetched.
 - Commands are called by full path, in an environment the scripts build
   themselves, so nothing inherited from your session changes what runs.
 
