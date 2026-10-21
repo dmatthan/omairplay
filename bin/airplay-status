@@ -68,25 +68,55 @@ command -v shairport-sync >/dev/null; BINARY=$?
 [[ -f $UNIT_PATH ]]; UNIT_FILE=$?
 [[ -f $CONFIG ]]; CONFIG_FILE=$?
 
-ACTIVE="$(systemctl --user is-active "$UNIT" 2>/dev/null)"
-UNITFILE="$(systemctl --user is-enabled "$UNIT" 2>/dev/null)"
+# One `systemctl show` per bus rather than an is-active and is-enabled per
+# unit: this runs every few seconds, and nine systemctl processes were most of
+# its ~45 ms. `show` prints a blank-line-separated block per unit, in the order
+# named, but its properties in an order of its own, so they are read by key.
+declare -A P=()
+read_units() {
+  local prefix="$1" n=0 line
+  while IFS= read -r line; do
+    if [[ -z $line ]]; then n=$((n + 1)); continue; fi
+    P[$prefix$n.${line%%=*}]="${line#*=}"
+  done
+}
+PROPS=LoadState,ActiveState,UnitFileState,ActiveEnterTimestamp
+read_units user < <(systemctl --user show "$UNIT" shairport-sync.service \
+  -p "$PROPS" --timestamp=unix 2>/dev/null)
+read_units sys < <(systemctl show shairport-sync.service nqptp.service \
+  -p "$PROPS" --timestamp=unix 2>/dev/null)
+
+# The exit-status meaning of is-active and is-enabled, from systemctl(1), so
+# the conflict checks below answer exactly as those commands did.
+is_active() { [[ $1 == active || $1 == reloading || $1 == refreshing ]]; }
+is_enabled() {
+  case "$1" in
+    enabled|enabled-runtime|static|indirect|alias|generated|transient) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ACTIVE="${P[user0.ActiveState]:-}"
+UNITFILE="${P[user0.UnitFileState]:-}"
+# is-enabled printed not-found for a missing unit; show leaves it empty.
+[[ -z $UNITFILE && ${P[user0.LoadState]:-} == not-found ]] && UNITFILE=not-found
 
 # Safety rule 4: anything else holding the AirPlay 2 slot is a conflict, and
 # there are two candidates -- the packaged system unit and the packaged *user*
 # unit, whose preset is "enabled".
 SYS=false
-systemctl is-active shairport-sync.service &>/dev/null && SYS=true
-systemctl is-enabled shairport-sync.service &>/dev/null && SYS=true
+is_active "${P[sys0.ActiveState]:-}" && SYS=true
+is_enabled "${P[sys0.UnitFileState]:-}" && SYS=true
 PKG=false
-systemctl --user is-active shairport-sync.service &>/dev/null && PKG=true
-systemctl --user is-enabled shairport-sync.service &>/dev/null && PKG=true
+is_active "${P[user1.ActiveState]:-}" && PKG=true
+is_enabled "${P[user1.UnitFileState]:-}" && PKG=true
 
-# The clock-sync service AirPlay 2 needs. It is a *system* service, so a plain
-# `systemctl is-active` reads it; asking needs no privilege. The unit asserts
-# it at start, but it can stop later without the receiver noticing, and then
-# the speaker is visible and silent.
+# The clock-sync service AirPlay 2 needs. It is a *system* service, so the
+# system bus reads it; asking needs no privilege. The unit asserts it at
+# start, but it can stop later without the receiver noticing, and then the
+# speaker is visible and silent.
 NQPTP=false
-systemctl is-active nqptp.service &>/dev/null && NQPTP=true
+is_active "${P[sys1.ActiveState]:-}" && NQPTP=true
 
 # Whether the receiver is actually accepting connections. shairport-sync in a
 # dead audio context keeps running and tears down its listeners while still
@@ -146,18 +176,20 @@ fi
 # broadcasting the old one -- which is a genuinely confusing state to be in.
 STALE=false
 if [[ -f $CONFIG ]] && [[ $ACTIVE == active ]]; then
-  STARTED="$(systemctl --user show "$UNIT" -p ActiveEnterTimestamp --value 2>/dev/null)"
-  if [[ -n $STARTED ]]; then
-    STARTED_EPOCH="$(date -d "$STARTED" +%s 2>/dev/null)"
+  # Already fetched above, as @<epoch> by --timestamp=unix.
+  STARTED_EPOCH="${P[user0.ActiveEnterTimestamp]:-}"
+  STARTED_EPOCH="${STARTED_EPOCH#@}"
+  if [[ $STARTED_EPOCH =~ ^[0-9]+$ ]]; then
     CONFIG_EPOCH="$(stat -c %Y "$CONFIG" 2>/dev/null)"
-    if [[ -n $STARTED_EPOCH && -n $CONFIG_EPOCH ]] \
+    if [[ $CONFIG_EPOCH =~ ^[0-9]+$ ]] \
        && (( CONFIG_EPOCH > STARTED_EPOCH )); then
       STALE=true
     fi
   fi
 fi
 
-json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+# In bash rather than a sed pipe per field.
+json_escape() { local s="${1//\\/\\\\}"; printf '%s' "${s//\"/\\\"}"; }
 
 printf '{'
 printf '"binary":%s,' "$(bool $BINARY)"
