@@ -73,6 +73,8 @@ run() {
   [[ $DRY_RUN == yes ]] && return 0
   "$@"
 }
+# One capped read that follows no symlink and cannot stall on a FIFO.
+read_capped() { dd if="$1" bs="$2" count=1 iflag=nofollow,nonblock status=none 2>/dev/null || true; }
 # A step that fails is recorded, never reported as done.
 step() {
   run "$@" && return 0
@@ -120,7 +122,7 @@ bold "2. Delete the unit, the generated config and the cover-art cache"
 CONF="$CONFIG_DIR/shairport-sync.conf"
 if [[ -f $UNIT_PATH && ! -L $UNIT_PATH ]]; then step rm -f "$UNIT_PATH"
 else echo "No unit file at $UNIT_PATH"; fi
-if [[ -f $CONF && ! -L $CONF ]] && grep -q '^// omairplay:generated' "$CONF"; then
+if [[ -f $CONF && ! -L $CONF ]] && read_capped "$CONF" 4096 | grep -q '^// omairplay:generated'; then
   step rm -f "$CONF"
 elif [[ -e $CONF || -L $CONF ]]; then
   echo "Leaving $CONF: this plugin did not write it."

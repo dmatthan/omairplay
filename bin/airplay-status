@@ -133,15 +133,17 @@ fi
 
 # The name the receiver actually advertises, read back from its config.
 NAME=""
+# One capped read that follows no symlink and cannot stall on a FIFO.
+read_capped() { dd if="$1" bs="$2" count=1 iflag=nofollow,nonblock status=none 2>/dev/null || true; }
 # Which version of airplay-write-config's template wrote the config (0: none),
 # so a config from an older template can be regenerated.
 TEMPLATE=0
-# -f and not -L: a FIFO would block the read forever. Capped as well.
 if [[ -f $CONFIG && ! -L $CONFIG ]]; then
-  TEMPLATE="$(head -c 65536 "$CONFIG" \
+  CONF_TEXT="$(read_capped "$CONFIG" 65536)"
+  TEMPLATE="$(printf '%s\n' "$CONF_TEXT" \
     | sed -n 's|^// omairplay:template \([0-9]\{1,4\}\)$|\1|p' | head -1)"
   TEMPLATE="${TEMPLATE:-0}"
-  NAME="$(head -c 65536 "$CONFIG" \
+  NAME="$(printf '%s\n' "$CONF_TEXT" \
     | sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*;.*/\1/p' \
     | head -1)"
   # Undo the libconfig escaping airplay-write-config applies.
