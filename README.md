@@ -5,6 +5,7 @@
 Turn your Omarchy machine into an AirPlay speaker. Tap to cast from your phone's
 AirPlay list, and the audio plays on your speakers or headphones. It's lightning-fast:
 your phone does the controls, so you don't need a bloated, memory-hungry Linux client.
+It uses about 50 times less memory than Spotify's desktop app.
 
 It wraps the terminal tool `shairport-sync` with a GUI: it installs what's
 needed, opens only the ports AirPlay uses and only to your local network, puts
