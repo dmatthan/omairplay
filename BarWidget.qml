@@ -50,6 +50,8 @@ Panel {
 
   readonly property string receiverState: svc ? svc.receiverState : "off"
   readonly property bool showArtwork: setting("showArtwork", true) !== false
+  readonly property bool playingShown: svc !== null && svc.setupComplete
+                                       && svc.effectiveRunning && svc.playing
 
   // Nerd Font glyphs, each confirmed present in JetBrainsMono Nerd Font by
   // checking the font's charset with fc-query. Written as explicit UTF-16
@@ -354,57 +356,22 @@ Panel {
           }
 
           // ---------------------------------------------------- now playing
-          Column {
+          NowPlaying {
             width: parent.width
-            spacing: Style.space(2)
-            visible: root.svc !== null && root.svc.setupComplete && root.svc.effectiveRunning
-                     && root.svc.playing && root.svc.hasTrack
-
-            // PlainText on every Text here, and essential on these two: the title,
-            // artist and album are the sending device's, and under the default
-            // AutoText an `<img src="http://...">` in them makes the shell fetch and
-            // buffer the response, with no click and nothing drawn (reproduced with a
-            // local server: one GET, +140 MB as it streamed; PlainText, no request).
-            Text {
-              textFormat: Text.PlainText
-              width: parent.width
-              text: root.svc ? root.svc.title : ""
-              color: root.foreground
-              wrapMode: Text.WordWrap
-              maximumLineCount: 2
-              elide: Text.ElideRight
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              font.bold: true
-            }
-
-            Text {
-              textFormat: Text.PlainText
-              width: parent.width
-              visible: text !== ""
-              text: {
-                if (!root.svc) return ""
-                var bits = []
-                if (root.svc.artist !== "") bits.push(root.svc.artist)
-                if (root.svc.album !== "" && root.svc.album !== root.svc.title)
-                  bits.push(root.svc.album)
-                return bits.join("  \u00b7  ")
-              }
-              color: root.dim
-              wrapMode: Text.WordWrap
-              maximumLineCount: 2
-              elide: Text.ElideRight
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
+            visible: root.playingShown
+            svc: root.svc
+            showArtwork: root.showArtwork
+            meterActive: root.opened && root.playingShown
+            foreground: root.foreground
+            accent: Color.accent
+            fontFamily: root.fontFamily
           }
 
           // A line for the states where there is nothing playing to show.
           Text {
             textFormat: Text.PlainText
             width: parent.width
-            visible: root.svc !== null && !(root.svc.setupComplete && root.svc.effectiveRunning
-                     && root.svc.playing && root.svc.hasTrack)
+            visible: root.svc !== null && !root.playingShown
             text: {
               if (!root.svc) return ""
               if (!root.svc.setupComplete) return "shairport-sync is not set up yet"
@@ -429,52 +396,6 @@ Panel {
               hasCursor: root.hasCursor("power")
               onToggled: if (root.svc) root.svc.toggle()
             }
-          }
-
-          // ------------------------------------------------------ cover art
-          Item {
-            width: parent.width
-            visible: root.showArtwork && root.svc !== null && root.svc.setupComplete
-                     && root.svc.effectiveRunning && root.svc.playing && root.svc.coverArtUrl !== ""
-            implicitHeight: visible ? Style.space(132) : 0
-
-            Image {
-              id: art
-              anchors.centerIn: parent
-              width: Math.min(parent.width, Style.space(132))
-              height: width
-              // The rebuilt copy, never the sender's file -- see coverArt in
-              // Service.qml. A local file:// read with nothing to fetch.
-              source: root.svc ? root.svc.coverArtUrl : ""
-              fillMode: Image.PreserveAspectCrop
-              asynchronous: true
-              cache: false
-              smooth: true
-              onStatusChanged: if (status === Image.Error) visible = false
-            }
-          }
-
-          // The phone's volume, which is readable but not settable from here.
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width
-            visible: root.svc !== null && root.svc.setupComplete && root.svc.effectiveRunning
-                     && root.svc.playing && root.svc.senderVolume >= 0
-            text: "Device volume " + Math.round((root.svc ? root.svc.senderVolume : 0) * 100) + "%"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            horizontalAlignment: Text.AlignHCenter
-          }
-
-          // A small aesthetic flourish, driven by the receiver's real output
-          // level. Alive only while this popup is open -- see LevelMeter.qml.
-          LevelMeter {
-            width: parent.width
-            active: root.opened && root.svc !== null && root.svc.setupComplete
-                    && root.svc.effectiveRunning && root.svc.playing
-            foreground: root.foreground
-            accent: Color.accent
           }
 
           // --------------------------------------------------------- alerts
