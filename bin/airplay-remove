@@ -73,28 +73,71 @@ run() {
   [[ $DRY_RUN == yes ]] && return 0
   "$@"
 }
+# A step that fails is recorded, never reported as done.
+step() {
+  run "$@" && return 0
+  warn "Failed: $*"
+  UNFINISHED+=( "$*" )
+  return 1
+}
+# Remove a folder only once nothing but what was just removed was in it.
+rmdir_if_empty() {
+  local dir="$1"; shift
+  [[ -d $dir && ! -L $dir ]] || return 0
+  local entry left=()
+  for entry in "$dir"/* "$dir"/.[!.]*; do
+    [[ -e $entry || -L $entry ]] || continue
+    local mine=no name
+    for name in "$@"; do [[ ${entry##*/} == "$name" ]] && mine=yes; done
+    [[ $mine == no ]] && left+=( "${entry##*/}" )
+  done
+  if (( ${#left[@]} )); then
+    echo "Leaving $dir: it also holds ${left[*]}"
+  else
+    step rmdir "$dir"
+  fi
+}
 
 bold "Removing the AirPlay receiver"
 echo
 
 bold "1. Stop and disable the user service"
 if systemctl --user is-active "$UNIT" &>/dev/null; then
-  run systemctl --user stop "$UNIT"
+  step systemctl --user stop "$UNIT"
 else
   echo "$UNIT is not running."
 fi
 if [[ "$(systemctl --user is-enabled "$UNIT" 2>/dev/null)" == "enabled" ]]; then
-  run systemctl --user disable "$UNIT"
+  step systemctl --user disable "$UNIT"
 else
   echo "$UNIT is not enabled at login."
 fi
 echo
 
 bold "2. Delete the unit, the generated config and the cover-art cache"
-[[ -f $UNIT_PATH ]] && run rm -f "$UNIT_PATH" || echo "No unit file at $UNIT_PATH"
-[[ -d $CONFIG_DIR ]] && run rm -rf "$CONFIG_DIR" || echo "No config at $CONFIG_DIR"
-[[ -d $CACHE_DIR ]] && run rm -rf "$CACHE_DIR" || echo "No cover-art cache at $CACHE_DIR"
-run systemctl --user daemon-reload
+# Only what this plugin wrote. A config without the generated marker, or any
+# other file in these folders, belongs to someone else and stays.
+CONF="$CONFIG_DIR/shairport-sync.conf"
+if [[ -f $UNIT_PATH && ! -L $UNIT_PATH ]]; then step rm -f "$UNIT_PATH"
+else echo "No unit file at $UNIT_PATH"; fi
+if [[ -f $CONF && ! -L $CONF ]] && grep -q '^// omairplay:generated' "$CONF"; then
+  step rm -f "$CONF"
+elif [[ -e $CONF || -L $CONF ]]; then
+  echo "Leaving $CONF: this plugin did not write it."
+else
+  echo "No config at $CONF"
+fi
+rmdir_if_empty "$CONFIG_DIR" shairport-sync.conf
+for item in coverart omairplay-art; do
+  [[ -d $CACHE_DIR/$item && ! -L $CACHE_DIR/$item ]] && step rm -rf "$CACHE_DIR/$item"
+done
+[[ -p $CACHE_DIR/metadata-pipe ]] && step rm -f "$CACHE_DIR/metadata-pipe"
+rmdir_if_empty "$CACHE_DIR" coverart omairplay-art metadata-pipe
+# Where configs before 0.13 had the receiver put its pipe: only a real FIFO
+# owned by this user, never through a link.
+OLD_PIPE=/tmp/shairport-sync-metadata
+if [[ -p $OLD_PIPE && ! -L $OLD_PIPE && -O $OLD_PIPE ]]; then step rm -f "$OLD_PIPE"; fi
+step systemctl --user daemon-reload
 echo
 
 bold "3. Firewall"
