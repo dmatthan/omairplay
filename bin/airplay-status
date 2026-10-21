@@ -36,8 +36,8 @@ shift
 
 
 UNIT="omarchy-airplay.service"
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync/shairport-sync.conf"
-UNIT_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
+CONFIG="$HOME/.config/shairport-sync/shairport-sync.conf"
+UNIT_PATH="$HOME/.config/systemd/user/$UNIT"
 
 bool() { [[ $1 == 0 ]] && printf 'true' || printf 'false'; }
 

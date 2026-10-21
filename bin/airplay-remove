@@ -57,10 +57,10 @@ HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 : "${OMAIRPLAY_UFW_COMMENT:=omairplay}"
 
 UNIT="omarchy-airplay.service"
-UNIT_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shairport-sync"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/io.github.dmatthan.omairplay"
+UNIT_PATH="$HOME/.config/systemd/user/$UNIT"
+CONFIG_DIR="$HOME/.config/shairport-sync"
+CACHE_DIR="$HOME/.cache/shairport-sync"
+STATE_DIR="$HOME/.local/state/io.github.dmatthan.omairplay"
 
 # Unfinished work: keeps the state directory and is repeated in the summary.
 UNFINISHED=()

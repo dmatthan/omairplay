@@ -39,9 +39,9 @@ shift
 
 HERE="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 INSTALL_FILE="$HERE/airplay-install-file"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/shairport-sync"
+CONFIG_DIR="$HOME/.config/shairport-sync"
 CONFIG_FILE="$CONFIG_DIR/shairport-sync.conf"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shairport-sync"
+CACHE_DIR="$HOME/.cache/shairport-sync"
 
 NAME="Omarchy Speaker"
 # The names `shairport-sync -h` prints. PipeWire goes through pipewire-pulse.
