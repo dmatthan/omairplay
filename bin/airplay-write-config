@@ -157,6 +157,15 @@ metadata = {
   // receiver writes nothing outside \$HOME, and so the art URL reaching MPRIS
   // stays readable after a tmp clean.
   cover_art_cache_directory = "$(escape_libconfig "$CACHE_DIR/coverart")";
+  // With metadata on -- needed here, because cover art is only asked for when
+  // it is -- the receiver always makes a metadata FIFO, and an empty name is
+  // ignored. Its default is /tmp/shairport-sync-metadata, created mode
+  // 0666 under umask 000 and reused if it already exists (shairport.c:1700,
+  // rtsp.c:3984 in 5.0.4) -- so any local account could read the track and
+  // cover art, or plant the FIFO first. Nothing here reads it; it only needs
+  // to live somewhere private: this 0700 directory, and not coverart/, whose
+  // files the receiver deletes each time a new cover arrives.
+  pipe_name = "$(escape_libconfig "$CACHE_DIR/metadata-pipe")";
 };
 
 sessioncontrol = {
