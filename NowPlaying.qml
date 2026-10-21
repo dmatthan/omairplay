@@ -168,6 +168,7 @@ Item {
       width: parent.width
       height: parent.height - lines.implicitHeight - lines.spacing
       active: root.meterActive
+      streamNode: root.svc ? root.svc.streamNode : null
       foreground: root.foreground
       accent: root.accent
     }

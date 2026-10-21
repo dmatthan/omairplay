@@ -11,9 +11,9 @@ Item {
   property color foreground: Color.foreground
   property color accent: Color.accent
 
-  // Exists only while the receiver is streaming.
-  readonly property var streamNode: findStream()
-  readonly property bool live: active && streamNode !== null
+  // The receiver's stream, from Service.qml; null while it is not streaming.
+  property var streamNode: null
+  readonly property bool live: active && !!streamNode
 
   // Whether the monitor has produced any level for this stream: Quickshell 0.3.1
   // reports nothing for a stream upmixed into a wider sink (quickshell#1147).
@@ -25,39 +25,6 @@ Item {
   visible: delivering
   opacity: delivering ? 1 : 0
   Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
-
-  // Which field names shairport-sync depends on how the stream was created;
-  // other playback streams must not drive the meter.
-  function looksLikeOurs(node) {
-    var candidates = [node.name, node.nickname, node.description]
-    var props = node.properties
-    if (props) {
-      candidates.push(props["application.name"],
-                      props["application.process.binary"],
-                      props["node.name"],
-                      props["media.name"])
-    }
-    for (var i = 0; i < candidates.length; i++) {
-      if (String(candidates[i] || "").toLowerCase().indexOf("shairport") !== -1)
-        return true
-    }
-    return false
-  }
-
-  function findStream() {
-    var nodes = Pipewire.nodes ? Pipewire.nodes.values : []
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i]
-      if (!n || !n.isStream || !n.audio) continue
-      // For a stream, isSink means it feeds audio into the graph: playback.
-      if (n.isSink !== true) continue
-      if (looksLikeOurs(n)) return n
-    }
-    return null
-  }
-
-  // Without this the node's properties are not kept live.
-  PwObjectTracker { objects: root.streamNode ? [root.streamNode] : [] }
 
   // Mean peak since the last bar: it follows vocals better than the maximum.
   property real _sum: 0
