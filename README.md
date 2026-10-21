@@ -2,9 +2,9 @@
 
 ![OmairPlay](preview.png?v=5)
 
-Turns your Omarchy machine into an AirPlay speaker. Tap it in your phone's
-AirPlay list and the audio comes out of your speakers — no desktop client, and
-playback stays on the phone.
+Turn your Omarchy machine into an AirPlay speaker. Tap to cast from your phone's
+AirPlay list, and the audio plays on your speakers or headphones. It's lightning-fast:
+your phone does the controls, so you don't need a bloated, memory-hungry Linux client.
 
 It wraps the terminal tool `shairport-sync` with a GUI: it installs what's
 needed, opens only the ports AirPlay uses and only to your local network, puts
@@ -130,11 +130,10 @@ Omarchy plugins run unsandboxed with your user's permissions, this one included:
 - Firewall rules cover private ranges only, never Anywhere, and `ufw` is never
   disabled or reset. Every rule is tagged `omairplay`, and removal finds them by
   that tag.
-- Your local network is the trust boundary: any device on it can play to the
-  receiver, without pairing. Turn the receiver off on networks you don't trust.
-- Cover art is whatever the sending device sends, so the popup and
-  notifications never show it as sent: only a copy rebuilt from its image data,
-  PNG or JPEG only, size-capped, with all metadata removed.
+- Only use the receiver on networks you trust: on public WiFi, someone else might
+  be able to cast to your device. This is a limitation upstream.
+- All metadata is removed from the files (etc. cover art, artist name) that the
+  casting device sends, so that your computer is safe from malicious attachments.
 - Track titles, artists, albums and the sending device's name are shown as
   plain text, length-capped, so markup in them is never interpreted or fetched.
 - Commands are called by full path, in an environment the scripts build
