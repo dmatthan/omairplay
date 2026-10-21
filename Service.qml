@@ -346,13 +346,6 @@ Item {
     refreshCoverArt()
   }
 
-  // "Title - Artist", or as much of it as there is.
-  readonly property string trackLine: {
-    if (!hasTrack) return ""
-    if (title !== "" && artist !== "") return title + "  -  " + artist
-    return title !== "" ? title : artist
-  }
-
   // Whether audio actually reaches PipeWire: the control channel can be up
   // while the audio path is dead. Same match as LevelMeter.qml.
   readonly property var streamNode: findStreamNode()
